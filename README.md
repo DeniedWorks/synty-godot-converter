@@ -4,13 +4,14 @@ Convert [Synty Studios](https://syntystore.com/) POLYGON asset packs to Godot 4.
 
 ## Features
 
-- **Automatic size normalization** - Uses Blender to measure models and scale to consistent sizes
+- **Prefab-level emissive materials** - Auto-detects mushrooms, crystals, lanterns, gems, portals and creates glowing materials
+- **Automatic collision generation** - Import script generates trimesh collision for all Synty FBX files
 - **Smart texture matching** - Scoring algorithm finds the right texture even with naming inconsistencies
 - **Material type detection** - Auto-detects glass, foliage, water, crystals, and standard materials
 - **Wind animation shader** - Trees and foliage animate with realistic wind effects
 - **Refractive glass/crystal shader** - Transparent materials with Fresnel and refraction
 - **LOD handling** - Only shows LOD0 (highest detail), hides LOD1/2/3 automatically
-- **Emissive texture discovery** - Finds and applies glow textures for mushrooms, crystals, etc.
+- **Optional size normalization** - Uses Blender to measure models and scale to consistent sizes
 - **GUI and CLI modes** - User-friendly interface or command-line automation
 
 ## Screenshots
@@ -76,7 +77,7 @@ python synty_converter.py \
 | `--pack`, `-p` | Pack name (default: auto-detected from folder) |
 | `--source`, `-s` | Source directory with extracted Synty files (required) |
 | `--project`, `-r` | Godot project root directory (required) |
-| `--normalize-size` | Target size in meters (default: 2.0) |
+| `--normalize-size` | Target size in meters (disabled by default) |
 | `--filter`, `-f` | Only convert assets matching this name |
 | `--dry-run`, `-n` | Preview without writing files |
 
@@ -127,6 +128,32 @@ Other POLYGON packs should work - please report issues if you encounter problems
 | Water | `*water*`, `*ocean*`, `*river*` | `water.gdshader` |
 | Shiny | `*_Shiny*` suffix | `polygon_shader.gdshader` (metallic 0.8) |
 | Standard | Everything else | `polygon_shader.gdshader` |
+
+### Prefab-Level Emissive Materials
+
+Even when glowing objects share textures with non-glowing props, the converter creates unique emissive materials per prefab:
+
+| Type | Keywords | Glow Color |
+|------|----------|------------|
+| Crystal | `crystal`, `geode` | Blue |
+| Gem | `gem`, `jewel`, `ruby`, `emerald`, `sapphire` | Purple/pink |
+| Lantern | `lantern`, `lamp`, `torch`, `candle`, `campfire` | Warm orange |
+| Mushroom | `mushroom`, `fungi`, `shroom` | Green |
+| Magic | `portal`, `rune`, `spell`, `orb`, `magic` | Purple |
+
+### Automatic Collision Generation
+
+Copy `synty_import_script.gd` to your Godot project's `tools/` folder and set it as the import script in `project.godot`:
+
+```ini
+[importer_defaults]
+scene={
+"import_script/path": "res://tools/synty_import_script.gd",
+...
+}
+```
+
+This automatically generates trimesh collision for all Synty FBX files on import.
 
 ## Shaders
 

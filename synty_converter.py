@@ -371,7 +371,6 @@ class MaterialInfo:
     is_shiny: bool = False
     is_glass: bool = False
     trunk_texture_name: str = ""  # For foliage materials needing separate trunk texture
-    emission_texture_name: str = ""  # For emissive materials (mushrooms, crystals, etc.)
 
 
 # ============================================================================
@@ -400,16 +399,8 @@ class Config:
         self.models_dir = self.output_dir / "Models"
         self.prefabs_dir = self.output_dir / "Prefabs"
 
-        # Shared generic assets folder (avoids duplicating SM_Gen_* across packs)
-        self.generic_dir = project_root / "assets" / "synty" / "POLYGON_Generic"
-        self.generic_models_dir = self.generic_dir / "Models"
-        self.generic_prefabs_dir = self.generic_dir / "Prefabs"
-        self.generic_textures_dir = self.generic_dir / "Textures"
-        self.generic_materials_dir = self.generic_dir / "Materials"
-
         # Godot resource paths (res://)
         self.res_base = f"res://assets/synty/{pack_name}"
-        self.generic_res_base = "res://assets/synty/POLYGON_Generic"
 
 
 # ============================================================================
@@ -479,9 +470,6 @@ class MaterialListParser:
         # === Enchanted Forest - Triplanar (use standard shader) ===
         'Dirt_Leaves_Triplanar_01': 'Dirt_Texture_Enchanted_01',
         'Moss_Enchanted_Triplanar_01': 'Moss_Enchanted_Texture_01',
-
-        # === Enchanted Forest - Crystals (use main texture for emissive glow) ===
-        'Crystal_Mat_01': 'PolygonNatureBiomesS2_Texture_01',
     }
 
     def _infer_texture_from_material(self, material_name: str, pack_prefix: str = "") -> str:
@@ -752,32 +740,84 @@ shader_parameter/fresnel_border = 2.0
 shader_parameter/fresnel_power = 3.0
 '''
 
-    # Glass/crystal material with emission texture support (transparent + glow)
-    GLASS_EMISSIVE_TEMPLATE = '''\
-[gd_resource type="ShaderMaterial" load_steps=3 format=3]
+    # Emissive material with refractive_transparent shader + glow
+    # Used for crystals, gems, lanterns, mushrooms, etc.
+    EMISSIVE_TEMPLATE = '''\
+[gd_resource type="ShaderMaterial" load_steps=2 format=3]
 
 [ext_resource type="Shader" path="{shader_path}" id="1"]
-[ext_resource type="Texture2D" path="{emission_texture_path}" id="2"]
 
 [resource]
 resource_name = "{material_name}"
 shader = ExtResource("1")
 shader_parameter/enable_triplanar = false
-shader_parameter/base_color = Color(0.7, 0.85, 1.0, 0.4)
-shader_parameter/metallic = 0.2
-shader_parameter/smoothness = 0.95
-shader_parameter/opacity = 0.4
+shader_parameter/base_color = Color({base_r}, {base_g}, {base_b}, {base_a})
+shader_parameter/metallic = {metallic}
+shader_parameter/smoothness = {smoothness}
+shader_parameter/opacity = {opacity}
 shader_parameter/enable_fresnel = true
-shader_parameter/fresnel_color = Color(0.8, 0.9, 1.0, 0.6)
+shader_parameter/fresnel_color = Color({fresnel_r}, {fresnel_g}, {fresnel_b}, 0.8)
 shader_parameter/fresnel_border = 2.5
-shader_parameter/fresnel_power = 3.5
-shader_parameter/enable_emission_texture = true
-shader_parameter/emission_texture = ExtResource("2")
-shader_parameter/emission_tiling = Vector2(1, 1)
-shader_parameter/emission_offset = Vector2(0, 0)
-shader_parameter/emission_color_tint = Color(1, 1, 1, 1)
-shader_parameter/emission_intensity = 1.5
+shader_parameter/fresnel_power = 4.0
+shader_parameter/enable_depth = true
+shader_parameter/deep_color = Color({deep_r}, {deep_g}, {deep_b}, 1.0)
+shader_parameter/deep_power = 4.0
+shader_parameter/shallow_color = Color({shallow_r}, {shallow_g}, {shallow_b}, 1.0)
+shader_parameter/shallow_power = 1.5
+shader_parameter/depth_power_multiplier = {depth_multiplier}
+shader_parameter/enable_emission_texture = false
+shader_parameter/emission_color_tint = Color({emit_r}, {emit_g}, {emit_b}, 1.0)
+shader_parameter/emission_intensity = {emit_intensity}
 '''
+
+    # Emissive presets for different object types
+    EMISSIVE_PRESETS = {
+        'crystal': {
+            'base_r': 0.6, 'base_g': 0.8, 'base_b': 1.0, 'base_a': 0.4,
+            'fresnel_r': 0.7, 'fresnel_g': 0.9, 'fresnel_b': 1.0,
+            'deep_r': 0.3, 'deep_g': 0.6, 'deep_b': 1.0,
+            'shallow_r': 0.6, 'shallow_g': 0.9, 'shallow_b': 1.0,
+            'emit_r': 0.5, 'emit_g': 0.8, 'emit_b': 1.0,
+            'metallic': 0.2, 'smoothness': 0.95, 'opacity': 0.4,
+            'depth_multiplier': 1.5, 'emit_intensity': 2.0,
+        },
+        'lantern': {
+            'base_r': 1.0, 'base_g': 0.9, 'base_b': 0.6, 'base_a': 0.3,
+            'fresnel_r': 1.0, 'fresnel_g': 0.8, 'fresnel_b': 0.4,
+            'deep_r': 1.0, 'deep_g': 0.6, 'deep_b': 0.2,
+            'shallow_r': 1.0, 'shallow_g': 0.9, 'shallow_b': 0.5,
+            'emit_r': 1.0, 'emit_g': 0.7, 'emit_b': 0.3,
+            'metallic': 0.1, 'smoothness': 0.8, 'opacity': 0.5,
+            'depth_multiplier': 2.0, 'emit_intensity': 3.0,
+        },
+        'mushroom': {
+            'base_r': 0.8, 'base_g': 1.0, 'base_b': 0.9, 'base_a': 0.5,
+            'fresnel_r': 0.6, 'fresnel_g': 1.0, 'fresnel_b': 0.8,
+            'deep_r': 0.2, 'deep_g': 0.8, 'deep_b': 0.5,
+            'shallow_r': 0.5, 'shallow_g': 1.0, 'shallow_b': 0.7,
+            'emit_r': 0.4, 'emit_g': 1.0, 'emit_b': 0.6,
+            'metallic': 0.0, 'smoothness': 0.7, 'opacity': 0.6,
+            'depth_multiplier': 1.2, 'emit_intensity': 1.5,
+        },
+        'gem': {
+            'base_r': 0.9, 'base_g': 0.4, 'base_b': 0.8, 'base_a': 0.4,
+            'fresnel_r': 1.0, 'fresnel_g': 0.5, 'fresnel_b': 0.9,
+            'deep_r': 0.7, 'deep_g': 0.2, 'deep_b': 0.6,
+            'shallow_r': 1.0, 'shallow_g': 0.6, 'shallow_b': 0.9,
+            'emit_r': 0.9, 'emit_g': 0.4, 'emit_b': 0.8,
+            'metallic': 0.3, 'smoothness': 0.95, 'opacity': 0.35,
+            'depth_multiplier': 1.8, 'emit_intensity': 2.5,
+        },
+        'magic': {
+            'base_r': 0.7, 'base_g': 0.5, 'base_b': 1.0, 'base_a': 0.4,
+            'fresnel_r': 0.8, 'fresnel_g': 0.6, 'fresnel_b': 1.0,
+            'deep_r': 0.5, 'deep_g': 0.3, 'deep_b': 0.9,
+            'shallow_r': 0.8, 'shallow_g': 0.6, 'shallow_b': 1.0,
+            'emit_r': 0.7, 'emit_g': 0.5, 'emit_b': 1.0,
+            'metallic': 0.1, 'smoothness': 0.9, 'opacity': 0.45,
+            'depth_multiplier': 1.6, 'emit_intensity': 2.0,
+        },
+    }
 
     # Foliage material with wind animation and alpha cutout
     FOLIAGE_TEMPLATE = '''\
@@ -828,31 +868,6 @@ shader_parameter/smoothness = 0.2
 shader_parameter/enable_base_texture = false
 '''
 
-    # Standard material with emission texture support
-    EMISSIVE_TEMPLATE = '''\
-[gd_resource type="ShaderMaterial" load_steps=4 format=3]
-
-[ext_resource type="Shader" path="{shader_path}" id="1"]
-[ext_resource type="Texture2D" path="{texture_path}" id="2"]
-[ext_resource type="Texture2D" path="{emission_texture_path}" id="3"]
-
-[resource]
-resource_name = "{material_name}"
-shader = ExtResource("1")
-shader_parameter/color_tint = Color(1, 1, 1, 1)
-shader_parameter/metallic = {metallic}
-shader_parameter/smoothness = {smoothness}
-shader_parameter/enable_base_texture = true
-shader_parameter/base_texture = ExtResource("2")
-shader_parameter/base_tiling = Vector2(1, 1)
-shader_parameter/base_offset = Vector2(0, 0)
-shader_parameter/enable_emission_texture = true
-shader_parameter/emission_texture = ExtResource("3")
-shader_parameter/emission_tiling = Vector2(1, 1)
-shader_parameter/emission_offset = Vector2(0, 0)
-shader_parameter/emission_color_tint = Color(1, 1, 1, 1)
-'''
-
     def _detect_material_type(self, material: MaterialInfo) -> str:
         """Detect material type from name patterns."""
         name = material.material_name.lower()
@@ -861,13 +876,23 @@ shader_parameter/emission_color_tint = Color(1, 1, 1, 1)
         if material.material_name in TREE_FOLIAGE_CONFIG:
             return 'foliage'
 
+        # Emissive materials - crystals, gems, lanterns, mushrooms with glow
+        # Check these BEFORE glass to use emissive presets instead
+        if any(x in name for x in ['crystal']):
+            return 'emissive_crystal'
+        if any(x in name for x in ['gem', 'jewel', 'geode']):
+            return 'emissive_gem'
+        if any(x in name for x in ['lantern', 'lamp', 'torch', 'candle', 'flame', 'fire']):
+            return 'emissive_lantern'
+        if any(x in name for x in ['mushroom', 'fungi', 'fungus', 'shroom']):
+            return 'emissive_mushroom'
+        # Magic/glow - but NOT "enchanted" which is often just a pack name prefix
+        if any(x in name for x in ['magic', 'glow', 'portal', 'rune', 'spell', 'orb']):
+            return 'emissive_magic'
+
         # Check for specific types
         if material.is_glass or 'glass' in name:
             return 'glass'
-
-        # Crystals/gems/jewels - transparent with glow
-        if any(x in name for x in ['crystal', 'gem', 'jewel', 'geode']):
-            return 'crystal'
 
         if material.is_shiny or '_shiny' in name:
             return 'shiny'
@@ -916,29 +941,21 @@ shader_parameter/emission_color_tint = Color(1, 1, 1, 1)
         """Generate .tres content for a material."""
         mat_type = self._detect_material_type(material)
 
+        # Handle emissive materials (crystals, gems, lanterns, mushrooms, etc.)
+        if mat_type.startswith('emissive_'):
+            preset_key = mat_type.replace('emissive_', '')
+            preset = self.EMISSIVE_PRESETS.get(preset_key, self.EMISSIVE_PRESETS['crystal'])
+            return self.EMISSIVE_TEMPLATE.format(
+                material_name=material.material_name,
+                shader_path=self.GLASS_SHADER,
+                **preset
+            )
+
         if mat_type == 'glass':
             return self.GLASS_TEMPLATE.format(
                 material_name=material.material_name,
                 shader_path=self.GLASS_SHADER
             )
-
-        # Crystal - transparent glass with emission glow
-        if mat_type == 'crystal':
-            # Use emission texture if available
-            if material.emission_texture_name:
-                emission_filename = f"{material.emission_texture_name}.png"
-                emission_texture_path = f"{config.res_base}/Textures/{emission_filename}"
-                return self.GLASS_EMISSIVE_TEMPLATE.format(
-                    material_name=material.material_name,
-                    shader_path=self.GLASS_SHADER,
-                    emission_texture_path=emission_texture_path
-                )
-            else:
-                # No emission texture - use regular glass
-                return self.GLASS_TEMPLATE.format(
-                    material_name=material.material_name,
-                    shader_path=self.GLASS_SHADER
-                )
 
         if mat_type == 'water':
             return self.WATER_TEMPLATE.format(
@@ -1004,20 +1021,6 @@ shader_parameter/emission_color_tint = Color(1, 1, 1, 1)
         #         smoothness=0.2
         #     )
 
-        # Check for emissive texture (mushrooms, crystals, etc.)
-        if material.emission_texture_name:
-            # Resolve emission texture filename (prefer PNG, fallback to TGA)
-            emission_filename = f"{material.emission_texture_name}.png"
-            emission_texture_path = f"{config.res_base}/Textures/{emission_filename}"
-            return self.EMISSIVE_TEMPLATE.format(
-                material_name=material.material_name,
-                texture_path=texture_path,
-                emission_texture_path=emission_texture_path,
-                shader_path=self.POLYGON_SHADER,
-                metallic=0.0,
-                smoothness=0.2
-            )
-
         # Standard material
         return self.STANDARD_TEMPLATE.format(
             material_name=material.material_name,
@@ -1039,6 +1042,57 @@ shader_parameter/emission_color_tint = Color(1, 1, 1, 1)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(content, encoding='utf-8')
         return output_path
+
+    def detect_prefab_emissive_type(self, prefab_name: str) -> str | None:
+        """
+        Detect if a prefab should have emissive materials based on its name.
+        Returns the emissive preset key or None if not emissive.
+        """
+        name = prefab_name.lower()
+
+        # Emissive prefab patterns - check prefab NAME not material name
+        if any(x in name for x in ['crystal', 'geode']):
+            return 'crystal'
+        if any(x in name for x in ['gem', 'jewel', 'ruby', 'emerald', 'sapphire', 'diamond']):
+            return 'gem'
+        if any(x in name for x in ['lantern', 'lamp', 'torch', 'candle', 'campfire']):
+            return 'lantern'
+        if any(x in name for x in ['mushroom', 'fungi', 'fungus', 'shroom']):
+            return 'mushroom'
+        if any(x in name for x in ['portal', 'rune', 'spell', 'orb', 'magic']):
+            return 'magic'
+
+        return None
+
+    def generate_prefab_emissive_material(
+        self,
+        prefab_name: str,
+        original_material_name: str,
+        emissive_type: str,
+        config: Config
+    ) -> tuple[str, Path]:
+        """
+        Generate a prefab-specific emissive material.
+
+        Returns:
+            - material name (e.g., "SM_Env_Mushroom_01_emissive")
+            - output path
+        """
+        # Create unique material name for this prefab
+        emissive_mat_name = f"{prefab_name}_emissive"
+        preset = self.EMISSIVE_PRESETS.get(emissive_type, self.EMISSIVE_PRESETS['crystal'])
+
+        content = self.EMISSIVE_TEMPLATE.format(
+            material_name=emissive_mat_name,
+            shader_path=self.GLASS_SHADER,
+            **preset
+        )
+
+        output_path = config.materials_dir / f"{emissive_mat_name}.tres"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(content, encoding='utf-8')
+
+        return emissive_mat_name, output_path
 
 
 # ============================================================================
@@ -1316,26 +1370,20 @@ class PrefabGenerator:
                 if matches:
                     return matches[0]
 
-        # Search for any */FBX subdirectory (e.g., Shops/FBX, Generic/FBX)
-        for subdir in config.source_dir.iterdir():
-            if subdir.is_dir():
-                fbx_subdir = subdir / "FBX"
-                if fbx_subdir.exists():
-                    for name in possible_names:
-                        matches = list(fbx_subdir.glob(f"**/{name}"))
-                        if matches:
-                            return matches[0]
-
         return None
 
     def generate(
         self,
         prefab: PrefabInfo,
         config: Config,
-        valid_materials: set[str] | None = None
+        valid_materials: set[str] | None = None,
+        emissive_material: str | None = None
     ) -> tuple[str, Path | None]:
         """
         Generate .tscn content for a prefab.
+
+        Args:
+            emissive_material: If set, use this material for all surfaces (for emissive prefabs)
 
         Returns:
             - tscn content string
@@ -1349,32 +1397,46 @@ class PrefabGenerator:
         model_subdir = prefab.category if prefab.category else "Props"
         model_res_path = f"{config.res_base}/Models/{model_subdir}/{fbx_source.name}"
 
-        # Collect unique materials for this prefab (only valid ones)
-        materials_used = {}
-        for mesh in prefab.meshes:
-            for slot in mesh.slots:
-                # Skip materials that don't have valid textures
-                if valid_materials and slot.material_name not in valid_materials:
-                    continue
-                if slot.material_name not in materials_used:
-                    materials_used[slot.material_name] = slot
+        # If emissive material is specified, use it for all surfaces
+        if emissive_material:
+            # Single emissive material for the whole prefab
+            ext_resources = [
+                f'[ext_resource type="PackedScene" path="{model_res_path}" id="1"]',
+                f'[ext_resource type="Material" path="{config.res_base}/Materials/{emissive_material}.tres" id="2"]'
+            ]
+            # Map all materials to the emissive one
+            mat_id_map = {}
+            for mesh in prefab.meshes:
+                for slot in mesh.slots:
+                    mat_id_map[slot.material_name] = 2  # All point to emissive material
+            load_steps = 2
+        else:
+            # Collect unique materials for this prefab (only valid ones)
+            materials_used = {}
+            for mesh in prefab.meshes:
+                for slot in mesh.slots:
+                    # Skip materials that don't have valid textures
+                    if valid_materials and slot.material_name not in valid_materials:
+                        continue
+                    if slot.material_name not in materials_used:
+                        materials_used[slot.material_name] = slot
 
-        # Build external resources
-        ext_resources = [
-            f'[ext_resource type="PackedScene" path="{model_res_path}" id="1"]'
-        ]
+            # Build external resources
+            ext_resources = [
+                f'[ext_resource type="PackedScene" path="{model_res_path}" id="1"]'
+            ]
 
-        mat_id = 2
-        mat_id_map = {}
-        for mat_name in materials_used:
-            mat_res_path = f"{config.res_base}/Materials/{mat_name}.tres"
-            ext_resources.append(
-                f'[ext_resource type="Material" path="{mat_res_path}" id="{mat_id}"]'
-            )
-            mat_id_map[mat_name] = mat_id
-            mat_id += 1
+            mat_id = 2
+            mat_id_map = {}
+            for mat_name in materials_used:
+                mat_res_path = f"{config.res_base}/Materials/{mat_name}.tres"
+                ext_resources.append(
+                    f'[ext_resource type="Material" path="{mat_res_path}" id="{mat_id}"]'
+                )
+                mat_id_map[mat_name] = mat_id
+                mat_id += 1
 
-        load_steps = 1 + len(materials_used)
+            load_steps = 1 + len(materials_used)
 
         # Extract actual mesh names from FBX for fuzzy matching
         fbx_mesh_names = self._extract_fbx_mesh_names(fbx_source)
@@ -1476,65 +1538,32 @@ class PrefabGenerator:
                     content += f'[node name="{godot_name}" parent="Model/{fbx_root_name}"]\n'
                     content += '\n'.join(overrides) + '\n\n'
 
-        content += '[node name="StaticBody3D" type="StaticBody3D" parent="."]\n\n'
-        content += '[node name="CollisionShape3D" type="CollisionShape3D" parent="StaticBody3D"]\n'
+        # Note: Collision is now auto-generated by synty_import_script.gd on FBX import
 
         return content, fbx_source
-
-    def _is_generic_prefab(self, prefab: PrefabInfo) -> bool:
-        """Check if prefab is a shared generic asset (SM_Gen_*, SM_Generic_*, etc.)."""
-        name = prefab.prefab_name
-        # Generic prefab patterns
-        return (
-            name.startswith('SM_Gen_') or
-            name.startswith('SM_Generic_') or
-            name.startswith('SK_Gen_') or
-            prefab.category == 'Generic'
-        )
-
-    def _generic_prefab_exists(self, prefab: PrefabInfo, config: Config) -> bool:
-        """Check if generic prefab already exists in any pack's folder."""
-        synty_dir = config.project_root / "assets" / "synty"
-        if not synty_dir.exists():
-            return False
-
-        prefab_filename = f"{prefab.prefab_name}.tscn"
-        category = prefab.category or "Props"
-
-        for pack_dir in synty_dir.iterdir():
-            if not pack_dir.is_dir():
-                continue
-            existing = pack_dir / "Prefabs" / category / prefab_filename
-            if existing.exists():
-                return True
-        return False
 
     def write_prefab(
         self,
         prefab: PrefabInfo,
         config: Config,
-        valid_materials: set[str] | None = None
-    ) -> tuple[Path | None, Path | None, bool]:
+        valid_materials: set[str] | None = None,
+        emissive_material: str | None = None
+    ) -> tuple[Path | None, Path | None]:
         """
         Write prefab .tscn file and copy FBX to models folder.
+
+        Args:
+            emissive_material: If set, use this material for all surfaces (for emissive prefabs)
 
         Returns:
             - tscn output path (or None)
             - model output path (or None)
-            - True if this was a generic prefab that already existed (skipped)
         """
-        is_generic = self._is_generic_prefab(prefab)
-
-        # For generic prefabs, check if already exists in any pack
-        if is_generic and self._generic_prefab_exists(prefab, config):
-            return None, None, True  # Already exists, skip
-
-        # Generate content (always use current pack's paths for materials)
-        content, fbx_source = self.generate(prefab, config, valid_materials)
+        content, fbx_source = self.generate(prefab, config, valid_materials, emissive_material)
         if not content or not fbx_source:
-            return None, None, False
+            return None, None
 
-        # Write prefab to current pack
+        # Write prefab
         category_dir = config.prefabs_dir / (prefab.category or "Props")
         category_dir.mkdir(parents=True, exist_ok=True)
         tscn_path = category_dir / f"{prefab.prefab_name}.tscn"
@@ -1547,7 +1576,7 @@ class PrefabGenerator:
         if not model_path.exists():
             shutil.copy2(fbx_source, model_path)
 
-        return tscn_path, model_path, False
+        return tscn_path, model_path
 
 
 # ============================================================================
@@ -1560,91 +1589,6 @@ class TextureCopier:
     def __init__(self):
         # Maps material texture_name -> actual copied filename
         self.texture_filename_map: dict[str, str] = {}
-        # Maps base texture_name -> emissive texture filename
-        self.emissive_texture_map: dict[str, str] = {}
-
-    def _find_emissive_texture(self, textures_dir: Path, base_tex_name: str) -> Path | None:
-        """
-        Find an emissive texture that corresponds to a base texture.
-
-        Patterns handled:
-        1. PolygonPack_Texture_01 -> PolygonPack_Emissive_01_A (replaces Texture_ with Emissive_, adds _A)
-        2. PolygonPack_Texture_01_A -> PolygonPack_Emissive_01_A (replaces Texture_ with Emissive_)
-        3. PolygonPack_Texture_01_A -> PolygonPack_01_A_Emissive (removes Texture_, adds _Emissive)
-        4. Wall_01 -> Wall_01_Emissive (appends _Emissive)
-        """
-        extensions = ['.png', '.tga', '.jpg']
-        search_dirs = [textures_dir / "Emissive", textures_dir]
-
-        # Pattern 1: Replace "_Texture_" with "_Emissive_", try adding _A suffix for base names without variant
-        # PolygonNatureBiomesS2_Texture_01 -> PolygonNatureBiomesS2_Emissive_01_A
-        if '_Texture_' in base_tex_name:
-            emissive_base = base_tex_name.replace('_Texture_', '_Emissive_')
-            # Check if base name already has a variant suffix like _A, _B, _C
-            has_variant = re.search(r'_[A-C]$', emissive_base)
-
-            for search_dir in search_dirs:
-                if not search_dir.exists():
-                    continue
-                for ext in extensions:
-                    if has_variant:
-                        # Direct replacement (Texture_01_A -> Emissive_01_A)
-                        for pattern in [f"{emissive_base}{ext}", f"**/{emissive_base}{ext}"]:
-                            matches = list(search_dir.glob(pattern))
-                            if matches:
-                                return matches[0]
-                    else:
-                        # Add _A variant suffix as default (Texture_01 -> Emissive_01_A)
-                        emissive_with_variant = f"{emissive_base}_A"
-                        for pattern in [f"{emissive_with_variant}{ext}", f"**/{emissive_with_variant}{ext}"]:
-                            matches = list(search_dir.glob(pattern))
-                            if matches:
-                                return matches[0]
-                        # Also try without variant suffix
-                        for pattern in [f"{emissive_base}{ext}", f"**/{emissive_base}{ext}"]:
-                            matches = list(search_dir.glob(pattern))
-                            if matches:
-                                return matches[0]
-
-        # Pattern 2: Remove "_Texture_" and append "_Emissive"
-        # PolygonCyberCity_Texture_01_A -> PolygonCyberCity_01_A_Emissive
-        if '_Texture_' in base_tex_name:
-            emissive_name = base_tex_name.replace('_Texture_', '_') + '_Emissive'
-            for search_dir in search_dirs:
-                if not search_dir.exists():
-                    continue
-                for ext in extensions:
-                    for pattern in [f"{emissive_name}{ext}", f"**/{emissive_name}{ext}"]:
-                        matches = list(search_dir.glob(pattern))
-                        if matches:
-                            return matches[0]
-
-        # Pattern 3: Simple append "_Emissive"
-        # Wall_01 -> Wall_01_Emissive
-        emissive_name = f"{base_tex_name}_Emissive"
-        for search_dir in search_dirs:
-            if not search_dir.exists():
-                continue
-            for ext in extensions:
-                for pattern in [f"{emissive_name}{ext}", f"**/{emissive_name}{ext}"]:
-                    matches = list(search_dir.glob(pattern))
-                    if matches:
-                        return matches[0]
-
-        # Pattern 4: Prefix with "Emissive_" (for simple numbered textures)
-        # Texture_01 -> Emissive_01
-        if base_tex_name.startswith('Texture_'):
-            emissive_name = 'Emissive_' + base_tex_name[8:]
-            for search_dir in search_dirs:
-                if not search_dir.exists():
-                    continue
-                for ext in extensions:
-                    for pattern in [f"{emissive_name}{ext}", f"**/{emissive_name}{ext}"]:
-                        matches = list(search_dir.glob(pattern))
-                        if matches:
-                            return matches[0]
-
-        return None
 
     def _find_texture_recursive(self, textures_dir: Path, tex_name: str) -> Path | None:
         """Search for a texture file recursively in the textures directory."""
@@ -1831,26 +1775,6 @@ class TextureCopier:
             if len(not_found) > 5:
                 print(f"    ... and {len(not_found) - 5} more")
 
-        # Discover and copy emissive textures
-        emissive_count = 0
-        for mat in materials.values():
-            if not mat.texture_name:
-                continue
-
-            emissive_src = self._find_emissive_texture(textures_source, mat.texture_name)
-            if emissive_src:
-                dst = config.textures_dir / emissive_src.name
-                if not dst.exists():
-                    shutil.copy2(emissive_src, dst)
-                    copied.append(dst)
-                # Update material with emission texture name
-                mat.emission_texture_name = emissive_src.stem
-                self.emissive_texture_map[mat.texture_name] = emissive_src.name
-                emissive_count += 1
-
-        if emissive_count > 0:
-            print(f"  Found {emissive_count} emissive textures")
-
         return copied
 
 
@@ -1971,8 +1895,14 @@ class SyntyConverter:
             # Water materials use color-based shader
             if any(x in name_lower for x in ['water', 'ocean', 'river', 'lake', 'pond']):
                 return False
-            # Gems/crystals/jewels/geodes use refractive shader (color-based, emission optional)
-            if any(x in name_lower for x in ['gem', 'crystal', 'jewel', 'geode']):
+            # Emissive materials use refractive shader (color-based, no texture needed)
+            emissive_keywords = [
+                'gem', 'crystal', 'jewel', 'geode',  # Gems/crystals
+                'lantern', 'lamp', 'torch', 'candle', 'flame', 'fire',  # Lights
+                'mushroom', 'fungi', 'fungus', 'shroom',  # Mushrooms
+                'magic', 'glow', 'portal', 'rune', 'spell', 'orb',  # Magic (not "enchant")
+            ]
+            if any(x in name_lower for x in emissive_keywords):
                 return False
             return True
 
@@ -1991,6 +1921,28 @@ class SyntyConverter:
             except Exception as e:
                 stats['errors'].append(f"Material {mat.material_name}: {e}")
 
+        # Step 3b: Generate prefab-specific emissive materials
+        # For prefabs like mushrooms that share textures but should glow
+        print("\nGenerating prefab emissive materials...")
+        prefab_emissive_map = {}  # prefab_name -> emissive_material_name
+
+        for prefab in prefabs:
+            emissive_type = self.material_gen.detect_prefab_emissive_type(prefab.prefab_name)
+            if emissive_type:
+                try:
+                    emissive_mat_name, path = self.material_gen.generate_prefab_emissive_material(
+                        prefab.prefab_name,
+                        None,  # We don't need the original material name
+                        emissive_type,
+                        self.config
+                    )
+                    prefab_emissive_map[prefab.prefab_name] = emissive_mat_name
+                    valid_materials.add(emissive_mat_name)
+                    stats['materials'] += 1
+                    print(f"  Created: {path.name} (emissive_{emissive_type})")
+                except Exception as e:
+                    stats['errors'].append(f"Emissive material for {prefab.prefab_name}: {e}")
+
         # Step 4: Generate prefabs
         print("\nGenerating prefabs...")
         # Prefab name patterns to skip (FX/effects that need custom shaders)
@@ -2007,18 +1959,12 @@ class SyntyConverter:
                 print(f"  Skipped: {prefab.prefab_name} (FX/effect)")
                 continue
 
-            # Skip collision mesh prefabs (Godot can auto-generate collision)
-            if '_Collision' in prefab.prefab_name:
-                stats['skipped'].append(prefab.prefab_name)
-                continue
-
             try:
-                tscn_path, model_path, was_generic_duplicate = self.prefab_gen.write_prefab(
-                    prefab, self.config, valid_materials
+                # Check if this prefab should use emissive material
+                emissive_mat = prefab_emissive_map.get(prefab.prefab_name)
+                tscn_path, model_path = self.prefab_gen.write_prefab(
+                    prefab, self.config, valid_materials, emissive_mat
                 )
-                if was_generic_duplicate:
-                    # Generic prefab already exists in another pack, skip silently
-                    continue
                 if tscn_path:
                     stats['prefabs'] += 1
                     print(f"  Created: {prefab.category}/{prefab.prefab_name}.tscn")
@@ -2049,20 +1995,20 @@ def main():
     parser.add_argument(
         '--source', '-s',
         type=Path,
-        required=True,
-        help='Source directory with extracted Synty files (required)'
+        default=Path(r'C:\SyntyGodot\POLYGON_Explorer_Kit_SourceFiles'),
+        help='Source directory with extracted files'
     )
     parser.add_argument(
         '--zip', '-z',
         type=Path,
-        default=None,
-        help='Source zip file (optional, for MaterialList fallback)'
+        default=Path(r'C:\SyntyComplete\POLYGON_Explorer_Kit_SourceFiles_v2.zip'),
+        help='Source zip file (for MaterialList)'
     )
     parser.add_argument(
         '--project', '-r',
         type=Path,
-        required=True,
-        help='Godot project root directory (required)'
+        default=Path(r'C:\Godot\Projects\rpg-game'),
+        help='Godot project root'
     )
     parser.add_argument(
         '--dry-run', '-n',
@@ -2078,19 +2024,16 @@ def main():
     parser.add_argument(
         '--normalize-size', '--normalize-height',
         type=float,
-        default=2.0,
+        default=None,
         dest='normalize_size',
         metavar='METERS',
-        help='Normalize all assets to this size in meters using largest dimension (default: 2.0).'
+        help='Normalize all assets to this size in meters using largest dimension (disabled by default).'
     )
 
     args = parser.parse_args()
 
-    # Use zip path if provided, otherwise use a placeholder
-    zip_path = args.zip if args.zip else args.source / "placeholder.zip"
-
     config = Config(
-        zip_path=zip_path,
+        zip_path=args.zip,
         source_dir=args.source,
         project_root=args.project,
         pack_name=args.pack,
