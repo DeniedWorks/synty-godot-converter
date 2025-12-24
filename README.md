@@ -32,17 +32,11 @@ Convert [Synty Studios](https://syntystore.com/) POLYGON asset packs to Godot 4.
 
 ### Godot Project Setup
 
-For automatic collision generation, add this to your `project.godot`:
+The converter automatically:
+1. Copies `synty_import_script.gd` to your project's `tools/` folder
+2. Updates `project.godot` to use it for collision generation
 
-```ini
-[importer_defaults]
-
-scene={
-"import_script/path": "res://tools/synty_import_script.gd",
-}
-```
-
-Then copy `synty_import_script.gd` to your project's `tools/` folder.
+No manual setup required!
 
 ## Installation
 

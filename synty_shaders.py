@@ -259,31 +259,56 @@ void fragment() {
 def install_import_script(project_root: Path, log_callback=None) -> Path | None:
     """Install the Godot import script for automatic collision generation."""
     import shutil
+    import re
     log = log_callback or print
 
     target_dir = project_root / "tools"
     target_dir.mkdir(parents=True, exist_ok=True)
     target_path = target_dir / "synty_import_script.gd"
 
-    if target_path.exists():
-        log(f"  Import script exists: synty_import_script.gd", "info")
-        return target_path
+    # Copy script if not exists
+    if not target_path.exists():
+        source_path = None
+        if getattr(sys, 'frozen', False):
+            bundle_dir = Path(sys._MEIPASS)
+            source_path = bundle_dir / "synty_import_script.gd"
+        if source_path is None or not source_path.exists():
+            source_path = Path(__file__).parent / "synty_import_script.gd"
 
-    # Try bundled location (PyInstaller)
-    source_path = None
-    if getattr(sys, 'frozen', False):
-        bundle_dir = Path(sys._MEIPASS)
-        source_path = bundle_dir / "synty_import_script.gd"
+        if source_path.exists():
+            shutil.copy2(source_path, target_path)
+            log(f"  Installed: synty_import_script.gd", "success")
+        else:
+            log(f"  Warning: Import script not found", "warning")
+            return None
 
-    # Try repo location
-    if source_path is None or not source_path.exists():
-        source_path = Path(__file__).parent / "synty_import_script.gd"
+    # Update project.godot to use the import script
+    project_file = project_root / "project.godot"
+    if project_file.exists():
+        content = project_file.read_text(encoding='utf-8')
+        script_path = 'res://tools/synty_import_script.gd'
 
-    if source_path.exists():
-        shutil.copy2(source_path, target_path)
-        log(f"  Installed: synty_import_script.gd", "success")
-        log(f"  NOTE: Add to project.godot [importer_defaults]: import_script/path = res://tools/synty_import_script.gd", "warning")
-        return target_path
-    else:
-        log(f"  Warning: Import script not found", "warning")
-        return None
+        if script_path in content:
+            log(f"  project.godot already configured", "info")
+        elif '"import_script/path"' in content:
+            # Replace existing empty import_script/path
+            content = re.sub(
+                r'"import_script/path":\s*""',
+                f'"import_script/path": "{script_path}"',
+                content
+            )
+            project_file.write_text(content, encoding='utf-8')
+            log(f"  Updated project.godot with import script", "success")
+        elif '[importer_defaults]' in content:
+            # Add to existing importer_defaults
+            content = content.replace(
+                'scene={',
+                f'scene={{\n"import_script/path": "{script_path}",',
+                1
+            )
+            project_file.write_text(content, encoding='utf-8')
+            log(f"  Added import script to project.godot", "success")
+        else:
+            log(f"  NOTE: Manually add import_script/path to project.godot", "warning")
+
+    return target_path
