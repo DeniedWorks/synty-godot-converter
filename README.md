@@ -33,7 +33,7 @@ Convert [Synty Studios](https://syntystore.com/) POLYGON asset packs to Godot 4.
 
 ### Option 1: Download Release (Recommended)
 
-1. Download `SyntyConverter.exe` from the [Releases](https://github.com/yourusername/synty-godot-converter/releases) page
+1. Download `SyntyConverter.exe` from the [Releases](https://github.com/DeniedWorks/synty-godot-converter/releases) page
 2. Run the executable - no installation required
 3. Install [Blender](https://www.blender.org/download/) if you want size normalization
 
@@ -41,7 +41,7 @@ Convert [Synty Studios](https://syntystore.com/) POLYGON asset packs to Godot 4.
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/synty-godot-converter.git
+git clone https://github.com/DeniedWorks/synty-godot-converter.git
 cd synty-godot-converter
 
 # Run the GUI
