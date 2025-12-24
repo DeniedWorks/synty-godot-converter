@@ -8,7 +8,7 @@ Convert [Synty Studios](https://syntystore.com/) POLYGON asset packs to Godot 4.
 ## Features
 
 - **Prefab-level emissive materials** - Auto-detects mushrooms, crystals, lanterns, gems, portals and creates glowing materials
-- **Automatic collision generation** - Import script generates trimesh collision for all Synty FBX files
+- **Automatic collision generation** - Trimesh collision for all props, skips LOD1+/FX/Glass
 - **Smart texture matching** - Scoring algorithm finds the right texture even with naming inconsistencies
 - **Material type detection** - Auto-detects glass, foliage, water, crystals, and standard materials
 - **Wind animation shader** - Trees and foliage animate with realistic wind effects
@@ -152,6 +152,18 @@ Even when glowing objects share textures with non-glowing props, the converter c
 | Mushroom | `mushroom`, `fungi`, `shroom` | Green |
 | Magic | `portal`, `rune`, `spell`, `orb`, `magic` | Purple |
 
+### Automatic Collision
+
+The converter installs `synty_import_script.gd` which generates **static trimesh collision** when Godot imports FBX files:
+
+| Mesh Type | Collision |
+|-----------|-----------|
+| LOD0 meshes | ✅ Trimesh collision |
+| LOD1-5 meshes | ❌ Skipped |
+| FX/Particle meshes | ❌ Skipped |
+| Glass/Water meshes | ❌ Skipped |
+
+Collision is generated automatically on import - no manual setup required.
 
 ## Shaders
 
