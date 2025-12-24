@@ -1,6 +1,9 @@
 # Synty to Godot Converter
 
-Convert [Synty Studios](https://syntystore.com/) POLYGON asset packs to Godot 4.5+ with proper materials, size normalization, and custom shaders.
+[![Release](https://img.shields.io/github/v/release/DeniedWorks/synty-godot-converter)](https://github.com/DeniedWorks/synty-godot-converter/releases)
+[![License](https://img.shields.io/github/license/DeniedWorks/synty-godot-converter)](LICENSE)
+
+Convert [Synty Studios](https://syntystore.com/) POLYGON asset packs to Godot 4.5+ with proper materials, emissive glow effects, and automatic collision generation.
 
 ## Features
 
