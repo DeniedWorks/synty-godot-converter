@@ -254,3 +254,36 @@ void fragment() {
 '''
 
     return "shader_type spatial;\nvoid fragment() { ALBEDO = vec3(1.0, 0.0, 1.0); }"
+
+
+def install_import_script(project_root: Path, log_callback=None) -> Path | None:
+    """Install the Godot import script for automatic collision generation."""
+    import shutil
+    log = log_callback or print
+
+    target_dir = project_root / "tools"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_path = target_dir / "synty_import_script.gd"
+
+    if target_path.exists():
+        log(f"  Import script exists: synty_import_script.gd", "info")
+        return target_path
+
+    # Try bundled location (PyInstaller)
+    source_path = None
+    if getattr(sys, 'frozen', False):
+        bundle_dir = Path(sys._MEIPASS)
+        source_path = bundle_dir / "synty_import_script.gd"
+
+    # Try repo location
+    if source_path is None or not source_path.exists():
+        source_path = Path(__file__).parent / "synty_import_script.gd"
+
+    if source_path.exists():
+        shutil.copy2(source_path, target_path)
+        log(f"  Installed: synty_import_script.gd", "success")
+        log(f"  NOTE: Add to project.godot [importer_defaults]: import_script/path = res://tools/synty_import_script.gd", "warning")
+        return target_path
+    else:
+        log(f"  Warning: Import script not found", "warning")
+        return None

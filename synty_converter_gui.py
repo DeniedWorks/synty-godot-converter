@@ -18,10 +18,11 @@ from pathlib import Path
 # Import the converter module (must be in same directory or Python path)
 try:
     from synty_converter import Config, SyntyConverter
-    from synty_shaders import install_shaders
+    from synty_shaders import install_shaders, install_import_script
 except ImportError:
     # When running as exe, the module should be bundled
     install_shaders = None
+    install_import_script = None
 
 
 class ConverterGUI:
@@ -403,6 +404,11 @@ class ConverterGUI:
                 installed = install_shaders(output, log_callback=self._log)
                 if installed:
                     self._log(f"  Installed {len(installed)} shaders", "success")
+
+            # Install import script for collision generation
+            if install_import_script and not dry_run:
+                self._log("Checking import script...", "info")
+                install_import_script(output, log_callback=self._log)
             self._log("", "info")
 
             self._set_status("Initializing...", self.accent_color)

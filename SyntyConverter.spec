@@ -23,6 +23,8 @@ a = Analysis(
     datas=[
         # Include shaders directory for bundled distribution
         (str(repo_dir / 'shaders'), 'shaders'),
+        # Include Godot import script for collision generation
+        (str(repo_dir / 'synty_import_script.gd'), '.'),
     ],
     hiddenimports=[
         'synty_converter',
