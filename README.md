@@ -26,9 +26,23 @@ Convert [Synty Studios](https://syntystore.com/) POLYGON asset packs to Godot 4.
 ## Requirements
 
 - **Python 3.10+** (or just download the standalone .exe)
-- **Blender 3.6+** - Required for size normalization feature
+- **Blender 3.6+** - Optional, only needed for size normalization
 - **Godot 4.5+** - Target engine version
 - **Synty POLYGON source files** - The FBX source files from Synty (not just Unity packages)
+
+### Godot Project Setup
+
+For automatic collision generation, add this to your `project.godot`:
+
+```ini
+[importer_defaults]
+
+scene={
+"import_script/path": "res://tools/synty_import_script.gd",
+}
+```
+
+Then copy `synty_import_script.gd` to your project's `tools/` folder.
 
 ## Installation
 
@@ -141,19 +155,6 @@ Even when glowing objects share textures with non-glowing props, the converter c
 | Mushroom | `mushroom`, `fungi`, `shroom` | Green |
 | Magic | `portal`, `rune`, `spell`, `orb`, `magic` | Purple |
 
-### Automatic Collision Generation
-
-Copy `synty_import_script.gd` to your Godot project's `tools/` folder and set it as the import script in `project.godot`:
-
-```ini
-[importer_defaults]
-scene={
-"import_script/path": "res://tools/synty_import_script.gd",
-...
-}
-```
-
-This automatically generates trimesh collision for all Synty FBX files on import.
 
 ## Shaders
 
