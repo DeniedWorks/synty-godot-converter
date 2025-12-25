@@ -299,15 +299,33 @@ def install_import_script(project_root: Path, log_callback=None) -> Path | None:
             project_file.write_text(content, encoding='utf-8')
             log(f"  Updated project.godot with import script", "success")
         elif '[importer_defaults]' in content:
-            # Add to existing importer_defaults
-            content = content.replace(
-                'scene={',
-                f'scene={{\n"import_script/path": "{script_path}",',
-                1
-            )
+            # Add to existing importer_defaults section
+            if 'scene={' in content:
+                # scene section exists, add to it
+                content = content.replace(
+                    'scene={',
+                    f'scene={{\n"import_script/path": "{script_path}",',
+                    1
+                )
+            else:
+                # importer_defaults exists but no scene section
+                content = content.replace(
+                    '[importer_defaults]',
+                    f'[importer_defaults]\n\nscene={{\n"import_script/path": "{script_path}"\n}}'
+                )
             project_file.write_text(content, encoding='utf-8')
             log(f"  Added import script to project.godot", "success")
         else:
-            log(f"  NOTE: Manually add import_script/path to project.godot", "warning")
+            # No importer_defaults section - add it at the end
+            importer_section = f'''
+[importer_defaults]
+
+scene={{
+"import_script/path": "{script_path}"
+}}
+'''
+            content = content.rstrip() + '\n' + importer_section
+            project_file.write_text(content, encoding='utf-8')
+            log(f"  Added importer_defaults section to project.godot", "success")
 
     return target_path
