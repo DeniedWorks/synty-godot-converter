@@ -1718,6 +1718,8 @@ class PrefabGenerator:
         self._fbx_mesh_cache: dict[Path, list[str]] = {}
         # Cache of filename (lowercase) -> full path for ALL FBX files in source
         self._fbx_file_cache: dict[str, Path] = {}
+        # Cache of mesh name (lowercase) -> combined FBX path (for Characters.fbx, etc.)
+        self._combined_fbx_cache: dict[str, Path] = {}
         self._bounds_reader = fbx_bounds_reader
         self._normalize_height = normalize_height
         self.force_scale = force_scale
@@ -1725,6 +1727,8 @@ class PrefabGenerator:
     def scan_fbx_files(self, source_dir: Path) -> None:
         """Scan source directory for all FBX files and cache their paths."""
         self._fbx_file_cache.clear()
+        self._combined_fbx_cache.clear()
+
         for fbx_path in source_dir.glob("**/*.fbx"):
             # Store by lowercase filename for case-insensitive matching
             filename_lower = fbx_path.name.lower()
@@ -1737,6 +1741,250 @@ class PrefabGenerator:
                 if 'fbx' in str(fbx_path.parent).lower() or 'character' in str(fbx_path.parent).lower():
                     if 'fbx' not in str(existing.parent).lower() and 'character' not in str(existing.parent).lower():
                         self._fbx_file_cache[filename_lower] = fbx_path
+
+        # Auto-detect combined FBX files (contain multiple distinct character types)
+        self._detect_combined_fbx_files()
+
+    def _detect_combined_fbx_files(self) -> None:
+        """Detect FBX files containing multiple distinct character types and cache their meshes."""
+        for filename_lower, fbx_path in self._fbx_file_cache.items():
+            mesh_names = self._extract_fbx_mesh_names(fbx_path)
+
+            # Look for character meshes (SM_Chr_, SK_Chr_, Character_)
+            char_pattern = re.compile(r'^(SM_Chr_|SK_Chr_|Character_)', re.IGNORECASE)
+            prefab_meshes = [m for m in mesh_names if char_pattern.match(m)]
+
+            if len(prefab_meshes) < 3:
+                continue  # Not enough character meshes to be a combined file
+
+            # Extract base character names (e.g., "Samurai" from "SK_Chr_Samurai_Male_01")
+            base_names = set()
+            for m in prefab_meshes:
+                parts = m.split('_')
+                # Pattern: SM_Chr_<Type>_... or SK_Chr_<Type>_... or Character_<Type>_...
+                if len(parts) >= 3:
+                    # Find the type part (skip SM/SK, Chr/Character prefix)
+                    if parts[0].upper() in ('SM', 'SK') and parts[1].lower() == 'chr':
+                        base_names.add(parts[2].lower())  # e.g., "samurai", "geisha"
+                    elif parts[0].lower() == 'character':
+                        base_names.add(parts[1].lower())  # e.g., "samurai", "geisha"
+
+            # If 3+ different character types, this is a combined FBX
+            if len(base_names) >= 3:
+                for mesh_name in mesh_names:
+                    mesh_lower = mesh_name.lower()
+                    if mesh_lower not in self._combined_fbx_cache:
+                        self._combined_fbx_cache[mesh_lower] = fbx_path
+                print(f"  Combined FBX detected: {fbx_path.name} ({len(prefab_meshes)} meshes, {len(base_names)} character types)")
+
+    def _get_character_attachments(self, prefab: 'PrefabInfo') -> list['MeshInfo']:
+        """Extract only the meshes that belong to this character, not cross-references.
+
+        The MaterialList lists meshes in this order:
+        1. Character's own attachments (hair, helmet, cape, etc.)
+        2. Character's body mesh (same base name as prefab)
+        3. All OTHER characters' meshes (cross-references, should be ignored)
+
+        We stop at the body mesh boundary to exclude other characters.
+        """
+        if not prefab.prefab_name.startswith(('SM_Chr_', 'Character_')):
+            return prefab.meshes  # Non-character, use all meshes
+
+        # Skip attachment prefabs - they don't have sub-attachments
+        if prefab.prefab_name.startswith('SM_Chr_Attach_'):
+            return prefab.meshes
+
+        # Find the character's own body mesh name pattern
+        # SM_Chr_Samurai_Male_01 -> look for mesh containing "Samurai_Male_01"
+        if prefab.prefab_name.startswith('SM_Chr_'):
+            base_name = prefab.prefab_name[7:]  # Remove "SM_Chr_"
+        else:
+            base_name = prefab.prefab_name[10:]  # Remove "Character_"
+
+        own_meshes = []
+        found_body = False
+
+        for mesh in prefab.meshes:
+            mesh_name = mesh.mesh_name.lstrip('_')
+
+            # Check if this is the character's own body mesh (boundary marker)
+            # Body mesh contains the base name but is NOT an attachment
+            is_body_mesh = (
+                base_name.lower() in mesh_name.lower() and
+                not mesh_name.startswith('SM_Chr_Attach_') and
+                not mesh_name.startswith('SM_Chr_Cape_') and
+                (mesh_name.startswith('SM_Chr_') or mesh_name.startswith('SK_Chr_') or
+                 mesh_name.startswith('Character_'))
+            )
+
+            if is_body_mesh:
+                own_meshes.append(mesh)  # Include the body mesh
+                found_body = True
+                break  # Stop here - everything after is cross-references
+
+            # Include attachments before the body
+            if mesh_name.startswith(('SM_Chr_Attach_', 'SM_Chr_Cape_', 'SK_Chr_Attach_')):
+                own_meshes.append(mesh)
+
+        # If we didn't find a body mesh, return attachments we found + first non-attachment
+        if not found_body and own_meshes:
+            # Try to find any remaining character mesh that could be the body
+            for mesh in prefab.meshes:
+                mesh_name = mesh.mesh_name.lstrip('_')
+                if mesh not in own_meshes and mesh_name.startswith(('SM_Chr_', 'SK_Chr_', 'Character_')):
+                    if not mesh_name.startswith(('SM_Chr_Attach_', 'SK_Chr_Attach_')):
+                        own_meshes.append(mesh)
+                        break
+
+        return own_meshes if own_meshes else prefab.meshes
+
+    def _is_character_prefab_using_combined_fbx(self, prefab: 'PrefabInfo') -> bool:
+        """Check if this is a character prefab that uses a combined FBX file."""
+        if not prefab.prefab_name.startswith('SM_Chr_'):
+            return False
+        if prefab.prefab_name.startswith('SM_Chr_Attach_'):
+            return False
+        # Check if this prefab's body mesh is in the combined cache
+        prefab_lower = prefab.prefab_name.lower()
+        return prefab_lower in self._combined_fbx_cache
+
+    def _generate_character_prefab(
+        self,
+        prefab: 'PrefabInfo',
+        config: 'Config',
+        valid_materials: set[str] | None = None,
+    ) -> tuple[str, Path | None, list[Path]]:
+        """
+        Generate .tscn content for a character prefab with multi-FBX support.
+
+        Returns:
+            - tscn content string
+            - Body FBX source path (or None if not found)
+            - List of attachment FBX paths
+        """
+        # Find body FBX (from combined Characters.fbx)
+        body_fbx = self._find_fbx_file(prefab, config)
+        if not body_fbx:
+            return "", None, []
+
+        # Get only this character's meshes (body + attachments)
+        character_meshes = self._get_character_attachments(prefab)
+
+        # Separate body mesh from attachment meshes
+        body_mesh = None
+        attachment_meshes = []
+        for mesh in character_meshes:
+            mesh_name = mesh.mesh_name.lstrip('_')
+            if mesh_name.startswith(('SM_Chr_Attach_', 'SM_Chr_Cape_', 'SK_Chr_Attach_')):
+                attachment_meshes.append(mesh)
+            else:
+                body_mesh = mesh
+
+        # Find FBX files for each attachment
+        attachment_fbx_paths = []
+        for att_mesh in attachment_meshes:
+            att_name = att_mesh.mesh_name.lstrip('_')
+            att_fbx_name = f"{att_name}.fbx".lower()
+            if att_fbx_name in self._fbx_file_cache:
+                attachment_fbx_paths.append(self._fbx_file_cache[att_fbx_name])
+
+        # Determine model path for body
+        if prefab.category and prefab.category.lower() != "prefabs":
+            body_model_path = f"{config.res_base}/Models/{prefab.category}/{body_fbx.name}"
+        else:
+            body_model_path = f"{config.res_base}/Models/{body_fbx.name}"
+
+        # Collect unique materials
+        materials_used = {}
+        for mesh in character_meshes:
+            for slot in mesh.slots:
+                if valid_materials and slot.material_name not in valid_materials:
+                    continue
+                if slot.material_name not in materials_used:
+                    materials_used[slot.material_name] = slot
+
+        # Build external resources
+        ext_resources = [
+            f'[ext_resource type="PackedScene" path="{body_model_path}" id="1"]'
+        ]
+
+        # Add attachment FBX resources
+        att_id = 2
+        att_id_map = {}  # att_mesh_name -> resource id
+        for att_path in attachment_fbx_paths:
+            if prefab.category and prefab.category.lower() != "prefabs":
+                att_model_path = f"{config.res_base}/Models/{prefab.category}/{att_path.name}"
+            else:
+                att_model_path = f"{config.res_base}/Models/{att_path.name}"
+            ext_resources.append(
+                f'[ext_resource type="PackedScene" path="{att_model_path}" id="{att_id}"]'
+            )
+            att_id_map[att_path.stem.lower()] = att_id
+            att_id += 1
+
+        # Add material resources
+        mat_id = att_id
+        mat_id_map = {}
+        for mat_name in materials_used:
+            mat_res_path = f"{config.res_base}/Materials/{mat_name}.tres"
+            ext_resources.append(
+                f'[ext_resource type="Material" path="{mat_res_path}" id="{mat_id}"]'
+            )
+            mat_id_map[mat_name] = mat_id
+            mat_id += 1
+
+        load_steps = len(ext_resources)
+
+        # Get ALL mesh names in the combined FBX for hiding
+        all_fbx_meshes = self._extract_fbx_mesh_names(body_fbx)
+
+        # Build target body mesh name for matching
+        target_body_name = prefab.prefab_name  # e.g., SM_Chr_Samurai_Male_01
+
+        # Build the scene content
+        content = f'[gd_scene load_steps={load_steps} format=3]\n\n'
+        content += '\n'.join(ext_resources) + '\n\n'
+        content += f'[node name="{prefab.prefab_name}" type="Node3D"]\n\n'
+
+        # Body instance (from Characters.fbx)
+        content += f'[node name="Body" parent="." instance=ExtResource("1")]\n\n'
+
+        # HIDE all non-target meshes in Characters.fbx (including embedded attachments)
+        # Structure: Body -> Skeleton3D -> SM_Chr_Name (mesh is direct child of Skeleton3D)
+        for mesh_name in all_fbx_meshes:
+            # Check if this is a character mesh (body or attachment)
+            if mesh_name.startswith(('SM_Chr_', 'SK_Chr_')):
+                if mesh_name.lower() == target_body_name.lower():
+                    # This is our target - apply material
+                    content += f'[node name="{mesh_name}" parent="Body/Skeleton3D"]\n'
+                    if body_mesh:
+                        for slot_idx, slot in enumerate(body_mesh.slots):
+                            if slot.material_name in mat_id_map:
+                                content += f'surface_material_override/{slot_idx} = ExtResource("{mat_id_map[slot.material_name]}")\n'
+                    content += '\n'
+                else:
+                    # Not our target (other characters OR embedded attachments) - hide
+                    content += f'[node name="{mesh_name}" parent="Body/Skeleton3D"]\n'
+                    content += 'visible = false\n\n'
+
+        # Add attachment instances as siblings (not children of Body)
+        for att_mesh in attachment_meshes:
+            att_name = att_mesh.mesh_name.lstrip('_')
+            att_lower = att_name.lower()
+            if att_lower in att_id_map:
+                res_id = att_id_map[att_lower]
+                # Friendly name without prefix
+                friendly_name = att_name.replace('SM_Chr_Attach_', '').replace('SM_Chr_Cape_', 'Cape_')
+                content += f'[node name="{friendly_name}" parent="." instance=ExtResource("{res_id}")]\n\n'
+
+                # Apply material override to the mesh inside the attachment FBX
+                content += f'[node name="{att_name}" parent="{friendly_name}"]\n'
+                for slot_idx, slot in enumerate(att_mesh.slots):
+                    if slot.material_name in mat_id_map:
+                        content += f'surface_material_override/{slot_idx} = ExtResource("{mat_id_map[slot.material_name]}")\n'
+                content += '\n'
+
+        return content, body_fbx, attachment_fbx_paths
 
     def _get_asset_category(self, prefab_name: str) -> str:
         """Determine asset category from prefab name for target height selection."""
@@ -1928,6 +2176,13 @@ class PrefabGenerator:
 
     def _find_fbx_file(self, prefab: PrefabInfo, config: Config) -> Path | None:
         """Find the FBX file for a prefab."""
+        # For SM_Chr_ prefabs (not attachments), check combined FBX cache FIRST
+        # This handles packs where all characters are in Characters.fbx
+        if prefab.prefab_name.startswith('SM_Chr_') and not prefab.prefab_name.startswith('SM_Chr_Attach_'):
+            prefab_lower = prefab.prefab_name.lower()
+            if prefab_lower in self._combined_fbx_cache:
+                return self._combined_fbx_cache[prefab_lower]
+
         # Build list of possible file names
         possible_names = [f"{prefab.prefab_name}.fbx"]
 
@@ -2007,7 +2262,7 @@ class PrefabGenerator:
         config: Config,
         valid_materials: set[str] | None = None,
         emissive_material: str | None = None
-    ) -> tuple[str, Path | None]:
+    ) -> tuple[str, Path | None, list[Path] | None]:
         """
         Generate .tscn content for a prefab.
 
@@ -2017,10 +2272,18 @@ class PrefabGenerator:
         Returns:
             - tscn content string
             - FBX source path (or None if not found)
+            - List of additional FBX paths (for character attachments) or None
         """
+        # Delegate to character prefab generator for combined FBX characters
+        if self._is_character_prefab_using_combined_fbx(prefab) and not emissive_material:
+            content, body_fbx, att_fbx_list = self._generate_character_prefab(
+                prefab, config, valid_materials
+            )
+            return content, body_fbx, att_fbx_list
+
         fbx_source = self._find_fbx_file(prefab, config)
         if not fbx_source:
-            return "", None
+            return "", None, None
 
         # Determine model path in Godot
         # If category is "Prefabs", put directly in Models/ (avoid Models/Prefabs/)
@@ -2172,7 +2435,7 @@ class PrefabGenerator:
 
         # Note: Collision is now auto-generated by synty_import_script.gd on FBX import
 
-        return content, fbx_source
+        return content, fbx_source, None
 
     def write_prefab(
         self,
@@ -2191,7 +2454,7 @@ class PrefabGenerator:
             - tscn output path (or None)
             - model output path (or None)
         """
-        content, fbx_source = self.generate(prefab, config, valid_materials, emissive_material)
+        content, fbx_source, attachment_fbx_list = self.generate(prefab, config, valid_materials, emissive_material)
         if not content or not fbx_source:
             return None, None
 
@@ -2214,6 +2477,13 @@ class PrefabGenerator:
         model_path = model_category_dir / fbx_source.name
         if not model_path.exists():
             shutil.copy2(fbx_source, model_path)
+
+        # Copy attachment FBX files (for character prefabs)
+        if attachment_fbx_list:
+            for att_fbx in attachment_fbx_list:
+                att_model_path = model_category_dir / att_fbx.name
+                if not att_model_path.exists():
+                    shutil.copy2(att_fbx, att_model_path)
 
         return tscn_path, model_path
 
@@ -2488,15 +2758,19 @@ class SyntyConverter:
             # Try source directory first (MaterialList files extracted there)
             prefabs, materials = self.parser.parse_from_directory(self.config.source_dir)
         except FileNotFoundError:
-            # Fall back to zip file
-            print("  Not found in source dir, trying zip file...")
-            try:
-                prefabs, materials = self.parser.parse_from_zip(
-                    self.config.zip_path,
-                    "MaterialList"
-                )
-            except FileNotFoundError as e:
-                stats['errors'].append(str(e))
+            # Fall back to zip file if provided
+            if self.config.zip_path:
+                print("  Not found in source dir, trying zip file...")
+                try:
+                    prefabs, materials = self.parser.parse_from_zip(
+                        self.config.zip_path,
+                        "MaterialList"
+                    )
+                except FileNotFoundError as e:
+                    stats['errors'].append(str(e))
+                    return stats
+            else:
+                stats['errors'].append("MaterialList not found in source directory and no zip file provided")
                 return stats
 
         print(f"  Found {len(prefabs)} prefabs, {len(materials)} unique materials")
@@ -2635,8 +2909,8 @@ def main():
     )
     parser.add_argument(
         '--pack', '-p',
-        default='POLYGON_Explorer_Kit',
-        help='Pack name (default: POLYGON_Explorer_Kit)'
+        required=True,
+        help='Pack name (e.g., POLYGON_Samurai_Empire)'
     )
     parser.add_argument(
         '--source', '-s',
@@ -2647,8 +2921,8 @@ def main():
     parser.add_argument(
         '--zip', '-z',
         type=Path,
-        default=Path(r'C:\SyntyComplete\POLYGON_Explorer_Kit_SourceFiles_v2.zip'),
-        help='Source zip file (for MaterialList)'
+        default=None,
+        help='Source zip file (for MaterialList, optional)'
     )
     parser.add_argument(
         '--project', '-r',
@@ -2728,7 +3002,7 @@ def main():
     print("=" * 60)
     print(f"Pack: {config.pack_name}")
     print(f"Source: {config.source_dir}")
-    print(f"Zip: {config.zip_path}")
+    print(f"Zip: {config.zip_path or '(none)'}")
     print(f"Output: {config.output_dir}")
     print("=" * 60)
 

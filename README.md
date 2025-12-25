@@ -17,6 +17,7 @@ Convert [Synty Studios](https://syntystore.com/) POLYGON asset packs to Godot 4.
 - **Optional size normalization** - Uses Blender to measure models and scale to consistent sizes
 - **Force scale override** - Apply fixed scale multiplier for packs with incorrect units (e.g., 100x for cm→m)
 - **Smart FBX discovery** - Scans entire source directory for FBX files, handles nested folder structures
+- **Combined character FBX handling** - Packs with Characters.fbx (multiple characters in one file) generate individual prefabs with proper visibility
 - **GUI and CLI modes** - User-friendly interface or command-line automation
 
 ## Video
@@ -96,8 +97,8 @@ python synty_converter.py \
 
 | Option | Description |
 |--------|-------------|
-| `--pack`, `-p` | Pack name (default: auto-detected from folder) |
-| `--source`, `-s` | Source directory with extracted Synty files (required) |
+| `--pack`, `-p` | Pack name (required) |
+| `--source`, `-s` | Source directory (auto-detected from pack name if not specified) |
 | `--project`, `-r` | Godot project root directory (required) |
 | `--normalize-size` | Target size in meters (disabled by default) |
 | `--force-scale` | Force scale multiplier for ALL assets (e.g., 100 for cm→m) |
@@ -188,6 +189,22 @@ The converter scans ALL FBX files in the source directory at startup for fast, r
 - **Smart filtering** - Skips props/weapons when matching character prefabs
 
 Console output shows: `Scanned 1874 FBX files`
+
+### Combined Character FBX
+
+Some packs bundle all characters into a single `Characters.fbx` file. The converter handles this by:
+
+1. **Auto-detecting combined FBX** - Files with 3+ distinct character types are detected automatically
+2. **Generating individual prefabs** - Each character gets its own `.tscn` with proper visibility settings
+3. **Hiding other characters** - Non-target characters and embedded attachments (hair, helmets) are set to `visible = false`
+
+Example structure:
+```
+Characters/
+├── SM_Chr_Samurai_Male_01.tscn  # Only shows Samurai Male 01
+├── SM_Chr_Geisha_01.tscn        # Only shows Geisha 01
+└── ...
+```
 
 ## Shaders
 
