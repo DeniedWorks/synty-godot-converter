@@ -15,6 +15,8 @@ Convert [Synty Studios](https://syntystore.com/) POLYGON asset packs to Godot 4.
 - **Refractive glass/crystal shader** - Transparent materials with Fresnel and refraction
 - **LOD handling** - Only shows LOD0 (highest detail), hides LOD1/2/3 automatically
 - **Optional size normalization** - Uses Blender to measure models and scale to consistent sizes
+- **Force scale override** - Apply fixed scale multiplier for packs with incorrect units (e.g., 100x for cm→m)
+- **Smart FBX discovery** - Scans entire source directory for FBX files, handles nested folder structures
 - **GUI and CLI modes** - User-friendly interface or command-line automation
 
 ## Video
@@ -81,6 +83,15 @@ python synty_converter.py \
     --project "C:\Godot\Projects\MyGame"
 ```
 
+```bash
+# For packs with tiny models (cm to m conversion)
+python synty_converter.py \
+    --pack POLYGON_Samurai \
+    --source "C:\SyntyGodot\POLYGON_Samurai_SourceFiles" \
+    --project "C:\Godot\Projects\MyGame" \
+    --force-scale 100
+```
+
 #### CLI Options
 
 | Option | Description |
@@ -89,6 +100,7 @@ python synty_converter.py \
 | `--source`, `-s` | Source directory with extracted Synty files (required) |
 | `--project`, `-r` | Godot project root directory (required) |
 | `--normalize-size` | Target size in meters (disabled by default) |
+| `--force-scale` | Force scale multiplier for ALL assets (e.g., 100 for cm→m) |
 | `--filter`, `-f` | Only convert assets matching this name |
 | `--dry-run`, `-n` | Preview without writing files |
 
@@ -115,6 +127,7 @@ Successfully tested with:
 - POLYGON_Explorer_Kit
 - POLYGON_Fantasy_Kingdom
 - POLYGON_Military
+- POLYGON_Samurai
 - POLYGON_Samurai_Empire
 - POLYGON_Shops
 - POLYGON_Street_Racer
@@ -123,11 +136,12 @@ Other POLYGON packs should work - please report issues if you encounter problems
 
 ## How It Works
 
-1. **Parse MaterialList** - Reads `MaterialList_*.txt` to map prefabs to materials and textures
-2. **Copy Textures** - Finds and copies textures using a scoring algorithm for fuzzy matching
-3. **Generate Materials** - Creates Godot ShaderMaterial files with appropriate shaders
-4. **Generate Prefabs** - Creates `.tscn` scene files with FBX import and material overrides
-5. **Size Normalization** - Uses Blender (headless) to measure FBX dimensions and scale uniformly
+1. **Scan FBX Files** - Scans entire source directory for all FBX files (handles nested folders like `Characters/`, `FBX/`, etc.)
+2. **Parse MaterialList** - Reads `MaterialList_*.txt` to map prefabs to materials and textures
+3. **Copy Textures** - Finds and copies textures using a scoring algorithm for fuzzy matching
+4. **Generate Materials** - Creates Godot ShaderMaterial files with appropriate shaders
+5. **Generate Prefabs** - Creates `.tscn` scene files with FBX import and material overrides
+6. **Size Normalization** - Uses Blender (headless) to measure FBX dimensions and scale uniformly
 
 ### Material Detection
 
@@ -164,6 +178,16 @@ The converter installs `synty_import_script.gd` which generates **static trimesh
 | Glass/Water meshes | ❌ Skipped |
 
 Collision is generated automatically on import - no manual setup required.
+
+### FBX Discovery
+
+The converter scans ALL FBX files in the source directory at startup for fast, reliable matching:
+
+- **Recursive scanning** - Finds FBX in any subfolder (FBX/, Characters/, Models/, etc.)
+- **Fuzzy matching** - Character prefabs like `Character_Geisha` match `SK_Character_Samurai_Geisha_01.fbx`
+- **Smart filtering** - Skips props/weapons when matching character prefabs
+
+Console output shows: `Scanned 1874 FBX files`
 
 ## Shaders
 
