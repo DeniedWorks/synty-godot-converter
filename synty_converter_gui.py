@@ -54,7 +54,7 @@ class ConverterGUI:
         self.source_var = tk.StringVar()
         self.output_var = tk.StringVar()
         self.pack_name_var = tk.StringVar()
-        self.normalize_var = tk.BooleanVar(value=True)
+        self.normalize_var = tk.BooleanVar(value=False)
         self.normalize_size_var = tk.DoubleVar(value=2.0)
         self.dry_run_var = tk.BooleanVar(value=False)
         self.filter_var = tk.StringVar()
@@ -185,7 +185,8 @@ class ConverterGUI:
         self.size_spinbox = ttk.Spinbox(normalize_frame,
             from_=0.5, to=10.0, increment=0.5,
             textvariable=self.normalize_size_var,
-            width=6)
+            width=6,
+            state=tk.DISABLED)
         self.size_spinbox.pack(side=tk.LEFT, padx=(10, 5))
 
         ttk.Label(normalize_frame, text="meters (requires Blender)").pack(side=tk.LEFT)
