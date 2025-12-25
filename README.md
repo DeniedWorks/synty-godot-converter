@@ -17,9 +17,9 @@ Convert [Synty Studios](https://syntystore.com/) POLYGON asset packs to Godot 4.
 - **Optional size normalization** - Uses Blender to measure models and scale to consistent sizes
 - **GUI and CLI modes** - User-friendly interface or command-line automation
 
-## Screenshots
+## Video
 
-*Screenshots coming soon*
+[VIDEO LINK](https://youtu.be/Q4GErSu7n5g)
 
 <!-- Add screenshots here:
 ![GUI Screenshot](screenshots/gui.png)
