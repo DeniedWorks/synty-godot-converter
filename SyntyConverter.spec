@@ -5,7 +5,10 @@ a = Analysis(
     ['synty_converter_gui.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[
+        ('shaders', 'shaders'),
+        ('synty_import_script.gd', '.'),
+    ],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

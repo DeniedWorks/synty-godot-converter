@@ -661,11 +661,9 @@ class SyntyConverterWithCallback(SyntyConverter):
                 continue
 
             try:
-                tscn_path, model_path, was_duplicate = self.prefab_gen.write_prefab(
+                tscn_path, model_path = self.prefab_gen.write_prefab(
                     prefab, self.config, valid_materials
                 )
-                if was_duplicate:
-                    continue
                 if tscn_path:
                     stats['prefabs'] += 1
                     if stats['prefabs'] % 50 == 0:
