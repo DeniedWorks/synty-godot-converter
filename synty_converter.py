@@ -46,6 +46,273 @@ TREE_FOLIAGE_CONFIG = {
 
 
 # ============================================================================
+# Auto-Detection for Foliage and Texture Mappings
+# ============================================================================
+
+class AutoDetector:
+    """
+    Auto-detects foliage configurations and texture mappings by scanning
+    the Textures folder and matching patterns to materials.
+    """
+
+    # Patterns indicating leaf/foliage textures
+    LEAF_PATTERNS = [
+        r'leaf', r'leaves', r'blossom', r'pine', r'maple', r'willow',
+        r'canopy', r'ginko', r'enchanted.*leaves', r'fern', r'koru',
+    ]
+
+    # Patterns indicating branch/trunk textures
+    BRANCH_PATTERNS = [
+        r'branch', r'trunk', r'bark', r'wood',
+    ]
+
+    def __init__(self, source_dir: Path):
+        """
+        Initialize AutoDetector.
+
+        Args:
+            source_dir: Path to the extracted source files directory
+        """
+        self.source_dir = source_dir
+        self.textures_dir = source_dir / "Textures"
+        self._texture_cache: dict[str, Path] | None = None
+
+    def _scan_textures(self) -> dict[str, Path]:
+        """Scan Textures folder and cache all texture files."""
+        if self._texture_cache is not None:
+            return self._texture_cache
+
+        self._texture_cache = {}
+        if not self.textures_dir.exists():
+            return self._texture_cache
+
+        for ext in ['*.png', '*.tga', '*.jpg', '*.jpeg']:
+            for tex_path in self.textures_dir.glob(f"**/{ext}"):
+                # Store both with and without extension
+                stem = tex_path.stem
+                self._texture_cache[stem.lower()] = tex_path
+                self._texture_cache[tex_path.name.lower()] = tex_path
+
+        return self._texture_cache
+
+    def _find_texture_by_pattern(self, patterns: list[str]) -> list[tuple[str, Path]]:
+        """Find all textures matching any of the given patterns."""
+        textures = self._scan_textures()
+        matches = []
+
+        for pattern in patterns:
+            regex = re.compile(pattern, re.IGNORECASE)
+            for name, path in textures.items():
+                if regex.search(name) and (name, path) not in matches:
+                    matches.append((name, path))
+
+        return matches
+
+    def auto_detect_foliage(self) -> dict[str, tuple[str, str]]:
+        """
+        Auto-detect foliage material configurations by scanning textures.
+
+        Returns:
+            Dict mapping material_name -> (leaf_texture, trunk_texture)
+        """
+        textures = self._scan_textures()
+        detected = {}
+
+        # Find all leaf-like textures
+        leaf_textures = self._find_texture_by_pattern(self.LEAF_PATTERNS)
+
+        # Find all branch/trunk textures
+        branch_textures = self._find_texture_by_pattern(self.BRANCH_PATTERNS)
+
+        # Default branch texture if available
+        default_branch = None
+        for name, path in branch_textures:
+            if 'branches_01' in name.lower():
+                default_branch = path.stem
+                break
+
+        for leaf_name, leaf_path in leaf_textures:
+            leaf_stem = leaf_path.stem
+
+            # Skip textures that are clearly not tree foliage
+            if any(x in leaf_name for x in ['ground', 'pile', 'heavy', 'cutout', 'small', 'card']):
+                continue
+
+            # Try to infer material name from texture name
+            # Common patterns:
+            # - Blossom_02 -> Cherry_Blossom_02
+            # - enchantedLeaves_01 -> EnchantedTree_Mat_01a
+            # - MapleSparse_01_TGA -> Maple_Orange_01
+            # - Pine_01 -> Pine_01
+            # - Ginko_01_TGA -> Ginko_01
+            # - BambooLeaf_01 -> Bamboo_Leaf_01
+
+            possible_materials = self._infer_material_names_from_leaf(leaf_stem)
+
+            # Find matching branch texture
+            branch_tex = self._find_matching_branch(leaf_stem, branch_textures) or default_branch
+
+            for mat_name in possible_materials:
+                if mat_name and mat_name not in detected:
+                    detected[mat_name] = (leaf_stem, branch_tex or 'Branches_01')
+
+        return detected
+
+    def _infer_material_names_from_leaf(self, leaf_texture: str) -> list[str]:
+        """
+        Infer possible material names from a leaf texture name.
+
+        Returns list of possible material names.
+        """
+        candidates = []
+        leaf_lower = leaf_texture.lower()
+
+        # Direct mapping (texture name is material name)
+        candidates.append(leaf_texture)
+
+        # Remove common suffixes
+        clean = re.sub(r'_(tga|png|jpg)$', '', leaf_texture, flags=re.IGNORECASE)
+        if clean != leaf_texture:
+            candidates.append(clean)
+
+        # Blossom_XX -> Cherry_Blossom_XX
+        if leaf_lower.startswith('blossom_'):
+            suffix = leaf_texture[8:]  # After "Blossom_"
+            candidates.append(f"Cherry_Blossom_{suffix}")
+
+        # enchantedLeaves_01 -> EnchantedTree_Mat_01a, EnchantedTree_Mat_01
+        if 'enchantedleaves' in leaf_lower:
+            match = re.search(r'(\d+)', leaf_texture)
+            if match:
+                num = match.group(1)
+                candidates.append(f"EnchantedTree_Mat_0{num}a")
+                candidates.append(f"EnchantedTree_Mat_0{num}")
+
+        # Leaves_Willow_01 -> EnchantedWillow_Mat_01
+        if 'leaves_willow' in leaf_lower:
+            match = re.search(r'(\d+)', leaf_texture)
+            if match:
+                num = match.group(1)
+                candidates.append(f"EnchantedWillow_Mat_0{num}")
+
+        # MapleSparse_XX_TGA -> Maple_Orange_XX, Maple_Branches_XX
+        if 'maplesparse' in leaf_lower:
+            match = re.search(r'(\d+)', leaf_texture)
+            if match:
+                num = match.group(1)
+                candidates.append(f"Maple_Orange_0{num}")
+                candidates.append(f"Maple_Branches_0{num}")
+
+        # Pine_XX -> Pine_XX
+        if leaf_lower.startswith('pine_'):
+            candidates.append(leaf_texture)
+
+        # Ginko_XX_TGA -> Ginko_XX
+        if 'ginko' in leaf_lower:
+            clean = re.sub(r'_tga$', '', leaf_texture, flags=re.IGNORECASE)
+            candidates.append(clean)
+
+        # BambooLeaf_XX -> Bamboo_Leaf_XX
+        if 'bambooleaf' in leaf_lower:
+            match = re.search(r'(\d+)', leaf_texture)
+            if match:
+                num = match.group(1)
+                candidates.append(f"Bamboo_Leaf_0{num}")
+
+        return candidates
+
+    def _find_matching_branch(
+        self,
+        leaf_texture: str,
+        branch_textures: list[tuple[str, Path]]
+    ) -> str | None:
+        """Find a branch texture that matches the leaf texture context."""
+        leaf_lower = leaf_texture.lower()
+
+        # For bamboo, use the main atlas texture
+        if 'bamboo' in leaf_lower:
+            # Look for PolygonSamuraiEmpire_Texture_01_A or similar
+            textures = self._scan_textures()
+            for name in textures:
+                if 'polygonsamuraiempire' in name and 'texture' in name and '_01_a' in name:
+                    return textures[name].stem
+            return None
+
+        # Default to Branches_01 for most trees
+        for name, path in branch_textures:
+            if 'branches_01' in name.lower():
+                return path.stem
+
+        return None
+
+    def auto_detect_texture_mapping(
+        self,
+        material_name: str,
+        texture_index: str = ""
+    ) -> str | None:
+        """
+        Auto-detect texture name for a material by trying various name transformations.
+
+        Args:
+            material_name: The material name to find a texture for
+            texture_index: Optional index hint (e.g., "01")
+
+        Returns:
+            Best matching texture name or None
+        """
+        textures = self._scan_textures()
+        mat_lower = material_name.lower()
+
+        # Direct match
+        if mat_lower in textures:
+            return textures[mat_lower].stem
+
+        # Try variations
+        candidates = []
+
+        # Plural to singular: Flowers_01 -> Flower_01
+        if mat_lower.endswith('s_') or '_s_' in mat_lower:
+            singular = re.sub(r's(_\d)', r'\1', material_name)
+            candidates.append(singular)
+
+        # Remove underscores: Bamboo_Leaf -> BambooLeaf
+        no_underscore = material_name.replace('_', '')
+        candidates.append(no_underscore)
+
+        # Remove prefix: Cherry_Blossom_02 -> Blossom_02
+        parts = material_name.split('_')
+        if len(parts) >= 2:
+            candidates.append('_'.join(parts[1:]))
+
+        # Add _TGA suffix for some textures
+        candidates.append(f"{material_name}_TGA")
+
+        # Mat suffix removal: EnchantedTree_Mat_01a -> EnchantedTree_01a
+        if '_mat_' in mat_lower:
+            no_mat = re.sub(r'_mat_', '_', material_name, flags=re.IGNORECASE)
+            candidates.append(no_mat)
+
+        # Try each candidate
+        for candidate in candidates:
+            if candidate.lower() in textures:
+                return textures[candidate.lower()].stem
+
+        return None
+
+    def get_all_materials_from_list(self, source_dir: Path) -> set[str]:
+        """Parse MaterialList files and extract all material names."""
+        materials = set()
+
+        for mat_file in source_dir.glob("MaterialList*.txt"):
+            content = mat_file.read_text(encoding='utf-8')
+            # Extract material names from Slot: MaterialName (TextureName) pattern
+            for match in re.finditer(r'^\s+Slot:\s*(\S+)\s*\([^)]+\)', content, re.MULTILINE):
+                materials.add(match.group(1))
+
+        return materials
+
+
+# ============================================================================
 # FBX Bounds Reader (Blender Headless)
 # ============================================================================
 
@@ -482,6 +749,7 @@ class MaterialListParser:
         - Wall_01 -> Wall_01 (search for matching texture)
         - Cherry_Blossom_02 -> Blossom_02 (Samurai Empire special case)
         - Vines_01 -> Generic_Ivy (explicit mapping)
+        - Crystal_Mat_01 -> "" (procedural shader material, no texture)
         """
         # Check explicit mappings first
         if material_name in self.MATERIAL_TEXTURE_MAP:
@@ -504,6 +772,13 @@ class MaterialListParser:
             parts = material_name.rsplit('_', 2)
             if len(parts) == 3:
                 return f"{parts[0]}_Texture_{parts[1]}_{parts[2]}"
+
+        # Materials with _Mat_ pattern are typically procedural shader materials without textures
+        # e.g., Crystal_Mat_01, Water_Mat_01, Fire_Mat_02
+        # These use custom shaders with no albedo texture, so return empty string
+        if re.match(r'^[A-Za-z]+_Mat_\d+[a-z]?$', material_name):
+            return ""
+
         return material_name
 
     def parse(self, content: str) -> tuple[list[PrefabInfo], dict[str, MaterialInfo]]:
@@ -644,6 +919,181 @@ class MaterialListParser:
                 all_materials.update(materials)
 
         return all_prefabs, all_materials
+
+
+# ============================================================================
+# Detection Comparison Mode
+# ============================================================================
+
+def _run_detection_comparison(config: Config) -> None:
+    """
+    Run comparison between hardcoded detection patterns and auto-detection.
+
+    Prints a detailed diff showing matches, mismatches, and newly detected items.
+    """
+    print("=" * 70)
+    print("DETECTION COMPARISON MODE")
+    print("=" * 70)
+    print(f"Source directory: {config.source_dir}")
+    print()
+
+    # Check if source directory exists
+    if not config.source_dir.exists():
+        print(f"ERROR: Source directory does not exist: {config.source_dir}")
+        return
+
+    # Initialize auto-detector
+    detector = AutoDetector(config.source_dir)
+
+    # Get all materials from MaterialList
+    all_materials = detector.get_all_materials_from_list(config.source_dir)
+    if not all_materials:
+        print("WARNING: No materials found in MaterialList files")
+        print("Make sure MaterialList*.txt files exist in the source directory")
+        return
+
+    print(f"Found {len(all_materials)} materials in MaterialList files")
+    print()
+
+    # =========================================================================
+    # Foliage Detection Comparison
+    # =========================================================================
+    print("=" * 70)
+    print("FOLIAGE DETECTION COMPARISON")
+    print("=" * 70)
+    print()
+
+    # Get hardcoded foliage config
+    hardcoded_foliage = TREE_FOLIAGE_CONFIG.copy()
+
+    # Get auto-detected foliage config
+    auto_foliage = detector.auto_detect_foliage()
+
+    # Find all unique material names
+    all_foliage_mats = set(hardcoded_foliage.keys()) | set(auto_foliage.keys())
+
+    matches = []
+    mismatches = []
+    hardcoded_only = []
+    auto_only = []
+
+    for mat_name in sorted(all_foliage_mats):
+        hardcoded = hardcoded_foliage.get(mat_name)
+        auto = auto_foliage.get(mat_name)
+
+        if hardcoded and auto:
+            if hardcoded == auto:
+                matches.append((mat_name, hardcoded))
+            else:
+                mismatches.append((mat_name, hardcoded, auto))
+        elif hardcoded and not auto:
+            hardcoded_only.append((mat_name, hardcoded))
+        elif auto and not hardcoded:
+            # Only show if material exists in MaterialList
+            if mat_name in all_materials:
+                auto_only.append((mat_name, auto))
+
+    # Print results
+    if matches:
+        print(f"MATCHES ({len(matches)}):")
+        for mat_name, config_tuple in matches:
+            print(f"  {mat_name} -> {config_tuple}")
+        print()
+
+    if mismatches:
+        print(f"MISMATCHES ({len(mismatches)}):")
+        for mat_name, hardcoded, auto in mismatches:
+            print(f"  {mat_name}")
+            print(f"    Hardcoded:     {hardcoded}")
+            print(f"    Auto-detected: {auto}")
+        print()
+
+    if hardcoded_only:
+        print(f"HARDCODED ONLY ({len(hardcoded_only)}) - not auto-detected:")
+        for mat_name, config_tuple in hardcoded_only:
+            print(f"  {mat_name} -> {config_tuple}")
+        print()
+
+    if auto_only:
+        print(f"NEW AUTO-DETECTED ({len(auto_only)}) - not in hardcoded config:")
+        for mat_name, config_tuple in auto_only:
+            print(f"  {mat_name} -> {config_tuple}")
+        print()
+
+    # =========================================================================
+    # Texture Mapping Comparison
+    # =========================================================================
+    print("=" * 70)
+    print("TEXTURE MAPPING COMPARISON")
+    print("=" * 70)
+    print()
+
+    # Get hardcoded texture mappings
+    hardcoded_textures = MaterialListParser.MATERIAL_TEXTURE_MAP.copy()
+
+    # Compare with auto-detection
+    texture_matches = []
+    texture_mismatches = []
+    texture_auto_only = []
+
+    for mat_name in sorted(all_materials):
+        hardcoded = hardcoded_textures.get(mat_name)
+        auto = detector.auto_detect_texture_mapping(mat_name)
+
+        if hardcoded and auto:
+            # Normalize for comparison (remove extensions, case insensitive)
+            hardcoded_norm = hardcoded.lower().replace('_tga', '')
+            auto_norm = auto.lower().replace('_tga', '')
+            if hardcoded_norm == auto_norm:
+                texture_matches.append((mat_name, hardcoded))
+            else:
+                texture_mismatches.append((mat_name, hardcoded, auto))
+        elif hardcoded and not auto:
+            # Hardcoded exists but auto-detection failed - not necessarily a problem
+            pass
+        elif auto and not hardcoded:
+            texture_auto_only.append((mat_name, auto))
+
+    if texture_matches:
+        print(f"MATCHES ({len(texture_matches)}):")
+        for mat_name, tex in texture_matches:
+            print(f"  {mat_name} -> {tex}")
+        print()
+
+    if texture_mismatches:
+        print(f"MISMATCHES ({len(texture_mismatches)}):")
+        for mat_name, hardcoded, auto in texture_mismatches:
+            print(f"  {mat_name}")
+            print(f"    Hardcoded:     {hardcoded}")
+            print(f"    Auto-detected: {auto}")
+        print()
+
+    if texture_auto_only:
+        print(f"NEW AUTO-DETECTED ({len(texture_auto_only)}) - could be added to MATERIAL_TEXTURE_MAP:")
+        for mat_name, tex in texture_auto_only[:20]:  # Limit output
+            print(f"  '{mat_name}': '{tex}',")
+        if len(texture_auto_only) > 20:
+            print(f"  ... and {len(texture_auto_only) - 20} more")
+        print()
+
+    # =========================================================================
+    # Summary
+    # =========================================================================
+    print("=" * 70)
+    print("SUMMARY")
+    print("=" * 70)
+    print()
+    print("Foliage Detection:")
+    print(f"  Matches:           {len(matches)}")
+    print(f"  Mismatches:        {len(mismatches)}")
+    print(f"  Hardcoded only:    {len(hardcoded_only)}")
+    print(f"  New auto-detected: {len(auto_only)}")
+    print()
+    print("Texture Mapping:")
+    print(f"  Matches:           {len(texture_matches)}")
+    print(f"  Mismatches:        {len(texture_mismatches)}")
+    print(f"  New auto-detected: {len(texture_auto_only)}")
+    print()
 
 
 # ============================================================================
@@ -868,6 +1318,111 @@ shader_parameter/smoothness = 0.2
 shader_parameter/enable_base_texture = false
 '''
 
+    # Standard material with emissive texture support
+    STANDARD_EMISSIVE_TEMPLATE = '''\
+[gd_resource type="ShaderMaterial" load_steps=4 format=3]
+
+[ext_resource type="Shader" path="{shader_path}" id="1"]
+[ext_resource type="Texture2D" path="{texture_path}" id="2"]
+[ext_resource type="Texture2D" path="{emissive_texture_path}" id="3"]
+
+[resource]
+resource_name = "{material_name}"
+shader = ExtResource("1")
+shader_parameter/color_tint = Color(1, 1, 1, 1)
+shader_parameter/metallic = {metallic}
+shader_parameter/smoothness = {smoothness}
+shader_parameter/enable_base_texture = true
+shader_parameter/base_texture = ExtResource("2")
+shader_parameter/base_tiling = Vector2(1, 1)
+shader_parameter/base_offset = Vector2(0, 0)
+shader_parameter/enable_emission_texture = true
+shader_parameter/emission_texture = ExtResource("3")
+shader_parameter/emission_color_tint = Color(1, 1, 1, 1)
+'''
+
+    def _find_emissive_texture(self, base_texture_name: str, config: Config) -> Path | None:
+        """
+        Find a matching emissive texture for a base texture.
+
+        Args:
+            base_texture_name: The base texture name (e.g., 'PolygonNatureBiomesS2_Texture_01_A.png')
+            config: Converter configuration with source directory paths
+
+        Returns:
+            Path to the emissive texture if found, None otherwise.
+
+        Search strategy:
+            1. Replace '_Texture_' with '_Emissive_' in the name
+            2. Try variant suffixes (_A, _B, _C) if base doesn't have them
+            3. Try alternate patterns like '_Emissive.png' suffix
+            4. Search in: Textures/Emissive, Textures, source_dir root
+        """
+        if not base_texture_name:
+            return None
+
+        # Remove extension if present for pattern matching
+        base_stem = Path(base_texture_name).stem
+        base_ext = Path(base_texture_name).suffix or '.png'
+
+        # Generate candidate emissive texture names
+        candidates = []
+
+        # Check if base already has a variant suffix like _A, _B, _C
+        has_variant_suffix = bool(re.search(r'_[A-Z]$', base_stem))
+
+        # Pattern 1: Replace '_Texture_' with '_Emissive_'
+        # e.g., PolygonNatureBiomesS2_Texture_01_A -> PolygonNatureBiomesS2_Emissive_01_A
+        if '_Texture_' in base_stem:
+            emissive_name = base_stem.replace('_Texture_', '_Emissive_')
+            candidates.append(emissive_name)
+
+            # Pattern 1b: If no variant suffix, also try with _A, _B, _C suffixes
+            # e.g., PolygonNatureBiomesS2_Texture_01 -> PolygonNatureBiomesS2_Emissive_01_A
+            if not has_variant_suffix:
+                for variant in ['_A', '_B', '_C', '_D']:
+                    candidates.append(f"{emissive_name}{variant}")
+
+        # Pattern 2: Append '_Emissive' before the suffix number
+        # e.g., SomeTexture_01_A -> SomeTexture_Emissive_01_A
+        match = re.match(r'^(.+?)(_\d+_[A-Z])?$', base_stem)
+        if match:
+            prefix = match.group(1)
+            suffix = match.group(2) or ''
+            candidates.append(f"{prefix}_Emissive{suffix}")
+
+        # Pattern 3: Simple _Emissive suffix
+        # e.g., SomeTexture_01 -> SomeTexture_01_Emissive
+        candidates.append(f"{base_stem}_Emissive")
+
+        # Search directories in priority order
+        search_dirs = [
+            config.source_dir / "Textures" / "Emissive",
+            config.source_dir / "Textures",
+            config.source_dir,
+        ]
+
+        # Extensions to try
+        extensions = ['.png', '.tga', '.jpg']
+
+        for search_dir in search_dirs:
+            if not search_dir.exists():
+                continue
+
+            for candidate in candidates:
+                for ext in extensions:
+                    # Direct path check
+                    emissive_path = search_dir / f"{candidate}{ext}"
+                    if emissive_path.exists():
+                        return emissive_path
+
+                    # Recursive search
+                    matches = list(search_dir.glob(f"**/{candidate}{ext}"))
+                    if matches:
+                        return matches[0]
+
+        return None
+
     def _detect_material_type(self, material: MaterialInfo) -> str:
         """Detect material type from name patterns."""
         name = material.material_name.lower()
@@ -876,23 +1431,18 @@ shader_parameter/enable_base_texture = false
         if material.material_name in TREE_FOLIAGE_CONFIG:
             return 'foliage'
 
-        # Emissive materials - crystals, gems, lanterns, mushrooms with glow
-        # Check these BEFORE glass to use emissive presets instead
-        if any(x in name for x in ['crystal']):
-            return 'emissive_crystal'
-        if any(x in name for x in ['gem', 'jewel', 'geode']):
-            return 'emissive_gem'
-        if any(x in name for x in ['lantern', 'lamp', 'torch', 'candle', 'flame', 'fire']):
-            return 'emissive_lantern'
-        if any(x in name for x in ['mushroom', 'fungi', 'fungus', 'shroom']):
-            return 'emissive_mushroom'
-        # Magic/glow - but NOT "enchanted" which is often just a pack name prefix
-        if any(x in name for x in ['magic', 'glow', 'portal', 'rune', 'spell', 'orb']):
-            return 'emissive_magic'
+        # NOTE: Keyword-based emissive detection has been removed.
+        # Emissive materials are now detected via texture discovery (_find_emissive_texture).
+        # This prevents false positives from material names containing keywords like
+        # 'crystal', 'gem', 'mushroom', etc. that may not actually be emissive.
 
         # Check for specific types
         if material.is_glass or 'glass' in name:
             return 'glass'
+
+        # Crystal/gem materials - use emissive glass shader for glowing transparent effect
+        if any(x in name for x in ['crystal', 'geode', 'jewel', 'gem']):
+            return 'emissive_crystal'
 
         if material.is_shiny or '_shiny' in name:
             return 'shiny'
@@ -1021,14 +1571,34 @@ shader_parameter/enable_base_texture = false
         #         smoothness=0.2
         #     )
 
-        # Standard material
+        # Check for emissive texture
+        emissive_texture_path = self._find_emissive_texture(texture_filename, config)
+        if emissive_texture_path:
+            # Copy emissive texture to output directory
+            emissive_dst = config.textures_dir / emissive_texture_path.name
+            if not emissive_dst.exists():
+                config.textures_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(emissive_texture_path, emissive_dst)
+
+            # Use emissive template
+            emissive_res_path = f"{config.res_base}/Textures/{emissive_texture_path.name}"
+            return self.STANDARD_EMISSIVE_TEMPLATE.format(
+                material_name=material.material_name,
+                texture_path=texture_path,
+                emissive_texture_path=emissive_res_path,
+                shader_path=self.POLYGON_SHADER,
+                metallic=0.0,
+                smoothness=0.2
+            )
+
+        # Standard material (no emissive texture found)
         return self.STANDARD_TEMPLATE.format(
             material_name=material.material_name,
             texture_path=texture_path,
             shader_path=self.POLYGON_SHADER,
             metallic=0.0,
             smoothness=0.2
-        )
+        ) + "shader_parameter/enable_emission_texture = false\n"
 
     def write_material(
         self,
@@ -1047,20 +1617,26 @@ shader_parameter/enable_base_texture = false
         """
         Detect if a prefab should have emissive materials based on its name.
         Returns the emissive preset key or None if not emissive.
-        """
-        name = prefab_name.lower()
 
-        # Emissive prefab patterns - check prefab NAME not material name
-        if any(x in name for x in ['crystal', 'geode']):
-            return 'crystal'
-        if any(x in name for x in ['gem', 'jewel', 'ruby', 'emerald', 'sapphire', 'diamond']):
-            return 'gem'
-        if any(x in name for x in ['lantern', 'lamp', 'torch', 'candle', 'campfire']):
-            return 'lantern'
-        if any(x in name for x in ['mushroom', 'fungi', 'fungus', 'shroom']):
-            return 'mushroom'
-        if any(x in name for x in ['portal', 'rune', 'spell', 'orb', 'magic']):
-            return 'magic'
+        NOTE: Keyword-based detection has been disabled. Emissive materials are now
+        detected via texture discovery (_find_emissive_texture) which looks for
+        actual emissive texture files rather than relying on naming conventions.
+        This prevents false positives for items like "Mushroom_Stew" or "Crystal_Ball_Stand".
+        """
+        # Keyword-based detection disabled - use texture discovery instead
+        # name = prefab_name.lower()
+        #
+        # # Emissive prefab patterns - check prefab NAME not material name
+        # if any(x in name for x in ['crystal', 'geode']):
+        #     return 'crystal'
+        # if any(x in name for x in ['gem', 'jewel', 'ruby', 'emerald', 'sapphire', 'diamond']):
+        #     return 'gem'
+        # if any(x in name for x in ['lantern', 'lamp', 'torch', 'candle', 'campfire']):
+        #     return 'lantern'
+        # if any(x in name for x in ['mushroom', 'fungi', 'fungus', 'shroom']):
+        #     return 'mushroom'
+        # if any(x in name for x in ['portal', 'rune', 'spell', 'orb', 'magic']):
+        #     return 'magic'
 
         return None
 
@@ -1331,11 +1907,25 @@ class PrefabGenerator:
         # Build list of possible file names
         possible_names = [f"{prefab.prefab_name}.fbx"]
 
-        # For character prefabs, try SK_Chr_ transformation
+        # Handle _Chr_ naming mismatch: MaterialList says SM_Chr_Werewolf_01 but FBX is SM_Werewolf_01.fbx
+        if "_Chr_" in prefab.prefab_name:
+            no_chr_name = prefab.prefab_name.replace("_Chr_", "_")
+            possible_names.insert(0, f"{no_chr_name}.fbx")
+
+        # Handle SM_Chr_ to SK_Chr_ mismatch: some packs only have skinned (SK_) versions
+        # e.g., MaterialList says SM_Chr_Werewolf_Undead_01 but FBX is SK_Chr_Werewolf_Undead_01.fbx
+        if prefab.prefab_name.startswith("SM_Chr_"):
+            sk_name = prefab.prefab_name.replace("SM_Chr_", "SK_Chr_")
+            possible_names.append(f"{sk_name}.fbx")
+
+        # PRIORITY 1: Character-specific transformation (try FIRST)
         if prefab.prefab_name.startswith("Character_"):
-            # Character_Explorer_Female_01 -> SK_Chr_Explorer_Female_01
-            transformed = prefab.prefab_name.replace("Character_", "SK_Chr_")
-            possible_names.append(f"{transformed}.fbx")
+            # Character_Explorer_Female_01 -> SK_Chr_Explorer_Female_01.fbx
+            chr_name = prefab.prefab_name.replace("Character_", "SK_Chr_")
+            possible_names.insert(0, f"{chr_name}.fbx")
+            # Also try Chr_ without SK_
+            chr_name_no_sk = prefab.prefab_name.replace("Character_", "Chr_")
+            possible_names.insert(1, f"{chr_name_no_sk}.fbx")
 
         # Also try mesh names directly
         for mesh in prefab.meshes:
@@ -1370,6 +1960,8 @@ class PrefabGenerator:
                 if matches:
                     return matches[0]
 
+        # Debug output when FBX not found
+        print(f"    DEBUG: FBX not found. Tried: {possible_names[:5]}...")
         return None
 
     def generate(
@@ -1394,8 +1986,11 @@ class PrefabGenerator:
             return "", None
 
         # Determine model path in Godot
-        model_subdir = prefab.category if prefab.category else "Props"
-        model_res_path = f"{config.res_base}/Models/{model_subdir}/{fbx_source.name}"
+        # If category is "Prefabs", put directly in Models/ (avoid Models/Prefabs/)
+        if prefab.category and prefab.category.lower() != "prefabs":
+            model_res_path = f"{config.res_base}/Models/{prefab.category}/{fbx_source.name}"
+        else:
+            model_res_path = f"{config.res_base}/Models/{fbx_source.name}"
 
         # If emissive material is specified, use it for all surfaces
         if emissive_material:
@@ -1533,6 +2128,11 @@ class PrefabGenerator:
                     # Static mesh root (e.g., main car body)
                     content += f'[node name="{godot_name}" parent="Model"]\n'
                     content += '\n'.join(overrides) + '\n\n'
+                elif godot_name in fbx_mesh_names:
+                    # Mesh exists at root level in FBX (not nested under parent)
+                    # This is common for multi-mesh FBX files where meshes are siblings
+                    content += f'[node name="{godot_name}" parent="Model"]\n'
+                    content += '\n'.join(overrides) + '\n\n'
                 else:
                     # Static mesh parts are children of the FBX root node
                     content += f'[node name="{godot_name}" parent="Model/{fbx_root_name}"]\n'
@@ -1564,13 +2164,20 @@ class PrefabGenerator:
             return None, None
 
         # Write prefab
-        category_dir = config.prefabs_dir / (prefab.category or "Props")
+        # If category is "Prefabs", use prefabs_dir directly (avoid Prefabs/Prefabs)
+        if prefab.category and prefab.category.lower() != "prefabs":
+            category_dir = config.prefabs_dir / prefab.category
+        else:
+            category_dir = config.prefabs_dir
         category_dir.mkdir(parents=True, exist_ok=True)
         tscn_path = category_dir / f"{prefab.prefab_name}.tscn"
         tscn_path.write_text(content, encoding='utf-8')
 
         # Copy FBX to models folder
-        model_category_dir = config.models_dir / (prefab.category or "Props")
+        if prefab.category and prefab.category.lower() != "prefabs":
+            model_category_dir = config.models_dir / prefab.category
+        else:
+            model_category_dir = config.models_dir
         model_category_dir.mkdir(parents=True, exist_ok=True)
         model_path = model_category_dir / fbx_source.name
         if not model_path.exists():
@@ -1995,8 +2602,8 @@ def main():
     parser.add_argument(
         '--source', '-s',
         type=Path,
-        default=Path(r'C:\SyntyGodot\POLYGON_Explorer_Kit_SourceFiles'),
-        help='Source directory with extracted files'
+        default=None,
+        help='Source directory (auto-detected from --pack)'
     )
     parser.add_argument(
         '--zip', '-z',
@@ -2029,15 +2636,47 @@ def main():
         metavar='METERS',
         help='Normalize all assets to this size in meters using largest dimension (disabled by default).'
     )
+    parser.add_argument(
+        '--compare-detection',
+        action='store_true',
+        help='Run auto-detection comparison mode: compares hardcoded patterns vs auto-detected patterns and prints diff'
+    )
 
     args = parser.parse_args()
 
+    # Auto-detect source directory from pack name if not specified
+    source_dir = args.source
+    if source_dir is None:
+        synty_root = Path(r'C:\SyntyGodot')
+        candidates = [
+            synty_root / f'{args.pack}_SourceFiles',
+            synty_root / f'{args.pack}_Source_Files',
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                source_dir = candidate
+                break
+        if source_dir is None:
+            for folder in synty_root.glob(f'*{args.pack}*'):
+                if folder.is_dir() and 'source' in folder.name.lower():
+                    source_dir = folder
+                    break
+        if source_dir is None:
+            print(f'ERROR: Could not auto-detect source for {args.pack}')
+            print(f'  Use --source to specify manually')
+            return
+
     config = Config(
         zip_path=args.zip,
-        source_dir=args.source,
+        source_dir=source_dir,
         project_root=args.project,
         pack_name=args.pack,
     )
+
+    # Handle --compare-detection mode
+    if args.compare_detection:
+        _run_detection_comparison(config)
+        return
 
     print("=" * 60)
     print("SYNTY TO GODOT CONVERTER")
