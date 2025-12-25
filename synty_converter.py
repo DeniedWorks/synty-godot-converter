@@ -42,6 +42,8 @@ TREE_FOLIAGE_CONFIG = {
     'EnchantedTree_Mat_01a': ('enchantedLeaves_01', 'Branches_01'),
     'EnchantedTree_Mat_02': ('enchantedLeaves_02', 'Branches_01'),
     'EnchantedWillow_Mat_01': ('Leaves_Willow_01', 'Branches_01'),
+    # Tree Ferns - uses same fern texture as regular ferns, trunk uses Branches
+    'TreeFern_Mat_02': ('Fern_2_TGA', 'Branches_01'),
 }
 
 
@@ -715,8 +717,8 @@ class MaterialListParser:
 
         # === Enchanted Forest - Ferns ===
         'Fern_Mat_02': 'Fern_2_TGA',
-        'TreeFern_Mat_02': 'TreeFern_01',
-        'TreeFern_01_Card': 'TreeFern_01',
+        'TreeFern_Mat_02': 'Fern_2_TGA',  # Uses same fern texture as regular ferns
+        'TreeFern_01_Card': 'TreeFern_01',  # Card/billboard for distant LOD
         'Koru_Mat_01': 'Fern_1_TGA',
 
         # === Enchanted Forest - Leaves/Vegetation ===
@@ -772,12 +774,6 @@ class MaterialListParser:
             parts = material_name.rsplit('_', 2)
             if len(parts) == 3:
                 return f"{parts[0]}_Texture_{parts[1]}_{parts[2]}"
-
-        # Materials with _Mat_ pattern are typically procedural shader materials without textures
-        # e.g., Crystal_Mat_01, Water_Mat_01, Fire_Mat_02
-        # These use custom shaders with no albedo texture, so return empty string
-        if re.match(r'^[A-Za-z]+_Mat_\d+[a-z]?$', material_name):
-            return ""
 
         return material_name
 
@@ -2126,11 +2122,6 @@ class PrefabGenerator:
                         print(f"  Warning: Unknown SK_ type for {godot_name}, skipping material override")
                 elif godot_name == fbx_root_name:
                     # Static mesh root (e.g., main car body)
-                    content += f'[node name="{godot_name}" parent="Model"]\n'
-                    content += '\n'.join(overrides) + '\n\n'
-                elif godot_name in fbx_mesh_names:
-                    # Mesh exists at root level in FBX (not nested under parent)
-                    # This is common for multi-mesh FBX files where meshes are siblings
                     content += f'[node name="{godot_name}" parent="Model"]\n'
                     content += '\n'.join(overrides) + '\n\n'
                 else:
