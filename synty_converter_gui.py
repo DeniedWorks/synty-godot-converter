@@ -56,6 +56,7 @@ class ConverterGUI:
         self.pack_name_var = tk.StringVar()
         self.normalize_var = tk.BooleanVar(value=False)
         self.normalize_size_var = tk.DoubleVar(value=2.0)
+        self.force_scale_var = tk.StringVar(value="")
         self.dry_run_var = tk.BooleanVar(value=False)
         self.filter_var = tk.StringVar()
         self.skip_existing_var = tk.BooleanVar(value=True)
@@ -190,6 +191,17 @@ class ConverterGUI:
         self.size_spinbox.pack(side=tk.LEFT, padx=(10, 5))
 
         ttk.Label(normalize_frame, text="meters (requires Blender)").pack(side=tk.LEFT)
+
+        # Force scale
+        force_scale_frame = ttk.Frame(settings_frame)
+        force_scale_frame.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Label(force_scale_frame, text="Force Scale:").pack(side=tk.LEFT)
+        self.force_scale_entry = ttk.Entry(force_scale_frame, textvariable=self.force_scale_var, width=8)
+        self.force_scale_entry.pack(side=tk.LEFT, padx=(10, 10))
+
+        ttk.Label(force_scale_frame, text="Override scale (e.g., 100 for cm to m). Leave empty for auto.",
+            foreground="#888888").pack(side=tk.LEFT)
 
         # Filter
         filter_frame = ttk.Frame(settings_frame)
@@ -443,13 +455,26 @@ class ConverterGUI:
             dry_run = self.dry_run_var.get()
             name_filter = self.filter_var.get().strip() or None
 
+            # Parse force scale (empty or 0 means None/auto)
+            force_scale_str = self.force_scale_var.get().strip()
+            force_scale = None
+            if force_scale_str:
+                try:
+                    force_scale_val = float(force_scale_str)
+                    if force_scale_val != 0:
+                        force_scale = force_scale_val
+                except ValueError:
+                    self._log(f"Warning: Invalid force scale '{force_scale_str}', using auto-detection", "warning")
+
             self._log("=" * 50, "header")
             self._log("SYNTY TO GODOT CONVERTER", "header")
             self._log("=" * 50, "header")
             self._log(f"Pack: {pack_name}", "info")
             self._log(f"Source: {source}", "info")
             self._log(f"Output: {output / 'assets' / 'synty' / pack_name}", "info")
-            if normalize:
+            if force_scale:
+                self._log(f"Force scale: {force_scale}x", "info")
+            elif normalize:
                 self._log(f"Size normalization: {normalize}m", "info")
             if name_filter:
                 self._log(f"Filter: {name_filter}", "info")
@@ -492,6 +517,7 @@ class ConverterGUI:
             converter = SyntyConverterWithCallback(
                 config,
                 normalize_height=normalize,
+                force_scale=force_scale,
                 log_callback=self._log,
                 progress_callback=self._update_progress,
                 cancel_check=lambda: not self.is_converting
@@ -549,9 +575,9 @@ class ConverterGUI:
 class SyntyConverterWithCallback(SyntyConverter):
     """Extended converter with progress callbacks for GUI."""
 
-    def __init__(self, config, normalize_height=None, log_callback=None,
+    def __init__(self, config, normalize_height=None, force_scale=None, log_callback=None,
                  progress_callback=None, cancel_check=None):
-        super().__init__(config, normalize_height)
+        super().__init__(config, normalize_height, force_scale=force_scale)
         self.log_callback = log_callback or print
         self.progress_callback = progress_callback or (lambda x: None)
         self.cancel_check = cancel_check or (lambda: False)

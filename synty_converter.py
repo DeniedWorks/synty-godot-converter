@@ -699,6 +699,7 @@ class MaterialListParser:
     MATERIAL_TEXTURE_MAP = {
         # === Samurai Empire ===
         'Ivy_01': 'Generic_Ivy',         # Ivy uses Generic_Ivy.tga
+        'Vines_01': 'Generic_Ivy',       # Vines also use Generic_Ivy.tga
         # Cutout materials (for pile/ground assets) map to sparse textures
         'Ginko_01_Cutout': 'Ginko_Sparse_01_TGA',
         'Maple_Leaf_01_Cutout': 'MapleLeaf_Small_TGA_01',
@@ -1700,7 +1701,8 @@ class PrefabGenerator:
         'default': 1.0,     # Default ~1m
     }
 
-    def __init__(self, fbx_bounds_reader: FBXBoundsReader | None = None, normalize_height: float | None = None):
+    def __init__(self, fbx_bounds_reader: FBXBoundsReader | None = None, normalize_height: float | None = None,
+                 force_scale: float | None = None):
         """
         Initialize PrefabGenerator.
 
@@ -1709,11 +1711,14 @@ class PrefabGenerator:
             normalize_height: Target height in meters for normalized scaling.
                               If provided with a bounds reader, assets will be scaled
                               to this height. If None, uses fixed category-based scaling.
+            force_scale: Override scale for all assets. If provided, bypasses all
+                         auto-detection and uses this fixed scale factor (e.g., 100 for cm to m).
         """
         # Cache of FBX path -> list of mesh names found in the file
         self._fbx_mesh_cache: dict[Path, list[str]] = {}
         self._bounds_reader = fbx_bounds_reader
         self._normalize_height = normalize_height
+        self.force_scale = force_scale
 
     def _get_asset_category(self, prefab_name: str) -> str:
         """Determine asset category from prefab name for target height selection."""
@@ -1762,6 +1767,10 @@ class PrefabGenerator:
 
         Returns 'skip' if Blender failed to read bounds (asset will be skipped).
         """
+        # Force scale overrides all other logic
+        if self.force_scale is not None:
+            return self.force_scale
+
         category = self._get_asset_category(prefab_name)
         name_lower = prefab_name.lower()
 
@@ -1833,6 +1842,7 @@ class PrefabGenerator:
                     rb'SK_[A-Za-z0-9_]+',
                     rb'FX_[A-Za-z0-9_]+',
                     rb'Chr_[A-Za-z0-9_]+',
+                    rb'Character_[A-Za-z0-9_]+',
                 ]
                 for pattern in patterns:
                     matches = re.findall(pattern, content)
@@ -2383,7 +2393,7 @@ class TextureCopier:
 class SyntyConverter:
     """Main converter orchestrating the conversion process."""
 
-    def __init__(self, config: Config, normalize_height: float | None = None):
+    def __init__(self, config: Config, normalize_height: float | None = None, force_scale: float | None = None):
         """
         Initialize SyntyConverter.
 
@@ -2392,8 +2402,10 @@ class SyntyConverter:
             normalize_height: Optional target height in meters for normalized scaling.
                               If provided, assets will be scaled so their height matches
                               this value. Requires Blender to be installed.
+            force_scale: Optional forced scale multiplier for ALL assets (overrides all other scaling).
         """
         self.config = config
+        self.force_scale = force_scale
         self.parser = MaterialListParser()
         self.material_gen = MaterialGenerator()
         self.texture_copier = TextureCopier()
@@ -2415,7 +2427,8 @@ class SyntyConverter:
 
         self.prefab_gen = PrefabGenerator(
             fbx_bounds_reader=self._bounds_reader,
-            normalize_height=self._normalize_height
+            normalize_height=self._normalize_height,
+            force_scale=force_scale
         )
 
     def convert(self, dry_run: bool = False, name_filter: str | None = None) -> dict:
@@ -2628,6 +2641,12 @@ def main():
         help='Normalize all assets to this size in meters using largest dimension (disabled by default).'
     )
     parser.add_argument(
+        '--force-scale',
+        type=float,
+        default=None,
+        help='Force scale multiplier for ALL assets (e.g., 100 for cm->m conversion)'
+    )
+    parser.add_argument(
         '--compare-detection',
         action='store_true',
         help='Run auto-detection comparison mode: compares hardcoded patterns vs auto-detected patterns and prints diff'
@@ -2678,7 +2697,7 @@ def main():
     print(f"Output: {config.output_dir}")
     print("=" * 60)
 
-    converter = SyntyConverter(config, normalize_height=args.normalize_size)
+    converter = SyntyConverter(config, normalize_height=args.normalize_size, force_scale=args.force_scale)
     stats = converter.convert(dry_run=args.dry_run, name_filter=args.filter)
 
     print("\n" + "=" * 60)
