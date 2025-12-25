@@ -275,14 +275,60 @@ class ConverterGUI:
         state = tk.NORMAL if self.normalize_var.get() else tk.DISABLED
         self.size_spinbox.config(state=state)
 
+    def _find_source_folder(self, selected_path: Path) -> Path | None:
+        """
+        Find the actual SourceFiles folder from user selection.
+
+        Synty packs extract with structure:
+          POLYGON_Pack_Name/
+          └── POLYGON_Pack_Name_SourceFiles/
+              ├── FBX/
+              ├── Textures/
+              └── MaterialList_*.txt
+
+        If user selects the parent, auto-navigate to SourceFiles subfolder.
+        Returns the correct path, or None if not found.
+        """
+        # Check if MaterialList exists in selected folder
+        if list(selected_path.glob("MaterialList*.txt")):
+            return selected_path
+
+        # Look for SourceFiles subfolder
+        # Common patterns: *_SourceFiles, *_Source, *SourceFiles
+        for subfolder in selected_path.iterdir():
+            if not subfolder.is_dir():
+                continue
+            name = subfolder.name.lower()
+            if 'sourcefiles' in name or name.endswith('_source'):
+                if list(subfolder.glob("MaterialList*.txt")):
+                    return subfolder
+
+        # Also check for direct FBX/Textures folders (some packs extract flat)
+        if (selected_path / "FBX").exists() or (selected_path / "Textures").exists():
+            # MaterialList might be named differently or in a subfolder
+            for txt in selected_path.rglob("MaterialList*.txt"):
+                return txt.parent
+
+        return None
+
     def _browse_source(self):
         """Open folder browser for source directory."""
         folder = filedialog.askdirectory(
             title="Select Synty Source Folder",
             initialdir=self.source_var.get() or "C:\\")
         if folder:
+            folder_path = Path(folder)
+
+            # Try to find the actual SourceFiles folder
+            actual_source = self._find_source_folder(folder_path)
+            if actual_source:
+                folder = str(actual_source)
+                if actual_source != folder_path:
+                    self._log(f"Auto-navigated to: {actual_source.name}", "info")
+
             self.source_var.set(folder)
-            # Auto-detect pack name
+
+            # Auto-detect pack name from the actual folder
             folder_name = Path(folder).name
             # Remove common suffixes
             pack_name = folder_name.replace("_SourceFiles", "").replace("_Source", "")
@@ -340,15 +386,29 @@ class ConverterGUI:
             messagebox.showerror("Error", "Please enter a pack name.")
             return False
 
-        # Check for MaterialList file
+        # Find the actual source folder (auto-navigate into SourceFiles if needed)
         source_path = Path(source)
-        material_lists = list(source_path.glob("MaterialList*.txt"))
-        if not material_lists:
+        actual_source = self._find_source_folder(source_path)
+
+        if not actual_source:
             messagebox.showerror("Error",
                 f"No MaterialList*.txt found in source folder.\n\n"
-                f"Make sure you selected the correct Synty source folder "
+                f"Make sure you selected the Synty source folder containing:\n"
+                f"  - MaterialList_*.txt\n"
+                f"  - FBX/ folder\n"
+                f"  - Textures/ folder\n\n"
                 f"(e.g., POLYGON_Explorer_Kit_SourceFiles)")
             return False
+
+        # Update source path if we found a subfolder
+        if actual_source != source_path:
+            self.source_var.set(str(actual_source))
+            self._log(f"Auto-detected SourceFiles: {actual_source.name}", "info")
+            # Update pack name from the actual folder
+            folder_name = actual_source.name
+            pack_name = folder_name.replace("_SourceFiles", "").replace("_Source", "")
+            self.pack_name_var.set(pack_name)
+            self._log(f"Updated pack name: {pack_name}", "info")
 
         return True
 

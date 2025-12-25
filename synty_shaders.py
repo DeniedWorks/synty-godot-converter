@@ -6,6 +6,7 @@ Bundled shader sources that get installed to target projects.
 These shaders are based on work by Giancarlo Niccolai, published under MIT license.
 """
 
+import sys
 from pathlib import Path
 
 # Shader file paths (relative to res://)
@@ -25,8 +26,6 @@ def get_shader_source_dir() -> Path | None:
     When running from source, looks for shaders/ relative to this file.
     When running as bundled exe, looks in the exe's directory.
     """
-    import sys
-
     # Try PyInstaller bundled location first
     if getattr(sys, 'frozen', False):
         # Running as bundled exe
