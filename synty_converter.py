@@ -1716,9 +1716,27 @@ class PrefabGenerator:
         """
         # Cache of FBX path -> list of mesh names found in the file
         self._fbx_mesh_cache: dict[Path, list[str]] = {}
+        # Cache of filename (lowercase) -> full path for ALL FBX files in source
+        self._fbx_file_cache: dict[str, Path] = {}
         self._bounds_reader = fbx_bounds_reader
         self._normalize_height = normalize_height
         self.force_scale = force_scale
+
+    def scan_fbx_files(self, source_dir: Path) -> None:
+        """Scan source directory for all FBX files and cache their paths."""
+        self._fbx_file_cache.clear()
+        for fbx_path in source_dir.glob("**/*.fbx"):
+            # Store by lowercase filename for case-insensitive matching
+            filename_lower = fbx_path.name.lower()
+            # If multiple files with same name, prefer ones in FBX or Characters folders
+            if filename_lower not in self._fbx_file_cache:
+                self._fbx_file_cache[filename_lower] = fbx_path
+            else:
+                # Prefer FBX or Characters folder over other locations
+                existing = self._fbx_file_cache[filename_lower]
+                if 'fbx' in str(fbx_path.parent).lower() or 'character' in str(fbx_path.parent).lower():
+                    if 'fbx' not in str(existing.parent).lower() and 'character' not in str(existing.parent).lower():
+                        self._fbx_file_cache[filename_lower] = fbx_path
 
     def _get_asset_category(self, prefab_name: str) -> str:
         """Determine asset category from prefab name for target height selection."""
@@ -1929,45 +1947,58 @@ class PrefabGenerator:
             # Character_Explorer_Female_01 -> SK_Chr_Explorer_Female_01.fbx
             chr_name = prefab.prefab_name.replace("Character_", "SK_Chr_")
             possible_names.insert(0, f"{chr_name}.fbx")
+            # Also try SK_Character_ prefix (some packs like Samurai use this)
+            # Character_Geisha_Black -> SK_Character_Samurai_Geisha_01.fbx
+            sk_char_name = "SK_" + prefab.prefab_name
+            possible_names.insert(1, f"{sk_char_name}.fbx")
             # Also try Chr_ without SK_
             chr_name_no_sk = prefab.prefab_name.replace("Character_", "Chr_")
-            possible_names.insert(1, f"{chr_name_no_sk}.fbx")
+            possible_names.insert(2, f"{chr_name_no_sk}.fbx")
 
-        # Also try mesh names directly
-        for mesh in prefab.meshes:
+        # For Character_ prefabs, prioritize Character_ mesh names over props
+        # Sort meshes: Character_ meshes first, then others
+        sorted_meshes = sorted(prefab.meshes, key=lambda m: (
+            0 if m.mesh_name.startswith('Character_') else 1
+        ))
+
+        for mesh in sorted_meshes:
             mesh_name = mesh.mesh_name.lstrip('_')  # Remove leading underscore
+            # Skip non-character meshes for Character_ prefabs (like SM_Prop_Pouch, Wep_*)
+            if prefab.prefab_name.startswith("Character_"):
+                if mesh_name.startswith(('SM_', 'Item_', 'Wep_')):
+                    continue  # Skip props and weapons for character prefabs
             possible_names.append(f"{mesh_name}.fbx")
             # Try with SM_ or SK_ prefix if not present
             if not mesh_name.startswith(('SM_', 'SK_')):
                 possible_names.append(f"SM_{mesh_name}.fbx")
                 possible_names.append(f"SK_{mesh_name}.fbx")
 
-        # Search in different directories
-        search_dirs = [
-            config.source_dir / prefab.category if prefab.category else None,
-            config.source_dir / "FBX",
-            config.source_dir / "Characters",
-            config.source_dir,
-        ]
+        # Use cached FBX file lookup (fast, case-insensitive)
+        for name in possible_names:
+            name_lower = name.lower()
+            if name_lower in self._fbx_file_cache:
+                return self._fbx_file_cache[name_lower]
 
-        for search_dir in search_dirs:
-            if search_dir is None or not search_dir.exists():
-                continue
-            for name in possible_names:
-                fbx_path = search_dir / name
-                if fbx_path.exists():
-                    return fbx_path
+        # Fuzzy matching: search for FBX files containing key parts of the name
+        # E.g., "Character_Geisha" should match "SK_Character_Samurai_Geisha_01.fbx"
+        # Skip common suffixes/prefixes that aren't useful for matching
+        skip_parts = {'character', 'chr', 'sm', 'sk', 'black', 'white', 'brown', 'red', 'blue',
+                      'green', 'yellow', 'orange', 'purple', 'grey', 'gray', 'fixedscale',
+                      '01', '02', '03', '04', '05', 'a', 'b', 'c', 'mat', 'material'}
 
-        # If not found, search recursively under FBX directory
-        fbx_root = config.source_dir / "FBX"
-        if fbx_root.exists():
-            for name in possible_names:
-                matches = list(fbx_root.glob(f"**/{name}"))
-                if matches:
-                    return matches[0]
+        for name in possible_names:
+            base_name = name.replace('.fbx', '').replace('.FBX', '')
+            parts = base_name.split('_')
 
-        # Debug output when FBX not found
-        print(f"    DEBUG: FBX not found. Tried: {possible_names[:5]}...")
+            # Find meaningful parts (not prefixes/suffixes/colors)
+            meaningful_parts = [p.lower() for p in parts if len(p) >= 3 and p.lower() not in skip_parts]
+
+            for key_part in meaningful_parts:
+                for cached_name, cached_path in self._fbx_file_cache.items():
+                    # Check if this is a character FBX containing our key part
+                    if key_part in cached_name and ('character' in cached_name or 'chr_' in cached_name):
+                        return cached_path
+
         return None
 
     def generate(
@@ -2446,6 +2477,10 @@ class SyntyConverter:
             'skipped': [],
             'errors': [],
         }
+
+        # Scan all FBX files in source directory for fast lookup
+        self.prefab_gen.scan_fbx_files(self.config.source_dir)
+        print(f"  Scanned {len(self.prefab_gen._fbx_file_cache)} FBX files")
 
         # Step 1: Parse MaterialList (try source directory first, then zip)
         print("Parsing MaterialList...")
