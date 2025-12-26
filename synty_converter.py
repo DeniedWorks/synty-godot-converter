@@ -1073,11 +1073,11 @@ class MaterialListParser:
         all_prefabs = []
         all_materials = {}
 
-        # Find all MaterialList files in the source directory
-        material_list_files = list(source_dir.glob("MaterialList*.txt"))
+        # Find all MaterialList files in the source directory (search recursively)
+        material_list_files = list(source_dir.glob("**/MaterialList*.txt"))
 
         if not material_list_files:
-            raise FileNotFoundError(f"MaterialList not found in {source_dir}")
+            raise FileNotFoundError(f"MaterialList not found in {source_dir} (searched recursively)")
 
         print(f"  Found {len(material_list_files)} MaterialList files:")
         for mat_file in material_list_files:
@@ -3248,6 +3248,22 @@ def main():
             print(f'ERROR: Could not auto-detect source for {args.pack}')
             print(f'  Use --source to specify manually')
             return
+
+    # Check for nested SourceFiles folder (some packs have extra wrapper folder)
+    # e.g., POLYGON_Apocalypse_SourceFiles_v3/Source_Files/
+    source_dir = Path(source_dir)
+    nested_candidates = [
+        source_dir / 'SourceFiles',
+        source_dir / 'Source_Files',
+    ]
+    for nested in nested_candidates:
+        if nested.exists() and nested.is_dir():
+            # Verify it has actual content (FBX or MaterialList)
+            has_content = any(nested.glob('**/*.fbx')) or any(nested.glob('**/MaterialList*.txt'))
+            if has_content:
+                print(f"Detected nested source folder: {nested.name}/")
+                source_dir = nested
+                break
 
     config = Config(
         zip_path=args.zip,

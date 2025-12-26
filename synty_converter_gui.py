@@ -9,6 +9,7 @@ Build standalone exe:
 """
 
 import os
+import re
 import sys
 import threading
 import tkinter as tk
@@ -288,39 +289,46 @@ class ConverterGUI:
         state = tk.NORMAL if self.normalize_var.get() else tk.DISABLED
         self.size_spinbox.config(state=state)
 
+    def _scan_source_directory(self, root_path: Path) -> dict:
+        """Scan source directory recursively and cache key file locations."""
+        cache = {
+            'material_lists': [],
+            'source_folders': [],
+        }
+        for path in root_path.rglob("*"):
+            if path.is_file():
+                if path.name.lower().startswith("materiallist") and path.suffix.lower() == ".txt":
+                    cache['material_lists'].append(path)
+            elif path.is_dir():
+                name_lower = path.name.lower()
+                if 'sourcefiles' in name_lower or name_lower.endswith('_source'):
+                    cache['source_folders'].append(path)
+        return cache
+
     def _find_source_folder(self, selected_path: Path) -> Path | None:
         """
         Find the actual SourceFiles folder from user selection.
-
-        Synty packs extract with structure:
-          POLYGON_Pack_Name/
-          └── POLYGON_Pack_Name_SourceFiles/
-              ├── FBX/
-              ├── Textures/
-              └── MaterialList_*.txt
-
-        If user selects the parent, auto-navigate to SourceFiles subfolder.
-        Returns the correct path, or None if not found.
+        Uses recursive scan to find MaterialList anywhere in the tree.
         """
-        # Check if MaterialList exists in selected folder
+        # Quick check: MaterialList at root level
         if list(selected_path.glob("MaterialList*.txt")):
             return selected_path
 
-        # Look for SourceFiles subfolder
-        # Common patterns: *_SourceFiles, *_Source, *SourceFiles
-        for subfolder in selected_path.iterdir():
-            if not subfolder.is_dir():
-                continue
-            name = subfolder.name.lower()
-            if 'sourcefiles' in name or name.endswith('_source'):
-                if list(subfolder.glob("MaterialList*.txt")):
-                    return subfolder
+        # Scan entire directory tree
+        cache = self._scan_source_directory(selected_path)
 
-        # Also check for direct FBX/Textures folders (some packs extract flat)
-        if (selected_path / "FBX").exists() or (selected_path / "Textures").exists():
-            # MaterialList might be named differently or in a subfolder
-            for txt in selected_path.rglob("MaterialList*.txt"):
-                return txt.parent
+        # Best option: folder containing MaterialList
+        if cache['material_lists']:
+            return cache['material_lists'][0].parent
+
+        # Fallback: source folder with FBX or Textures
+        for source_folder in cache['source_folders']:
+            if (source_folder / "FBX").exists() or (source_folder / "Textures").exists():
+                return source_folder
+
+        # Last resort: check if FBX/Textures exist anywhere
+        if list(selected_path.rglob("FBX")) or list(selected_path.rglob("Textures")):
+            return selected_path
 
         return None
 
@@ -331,8 +339,10 @@ class ConverterGUI:
             initialdir=self.source_var.get() or "C:\\")
         if folder:
             folder_path = Path(folder)
+            original_folder_name = folder_path.name  # Save before navigation
 
-            # Try to find the actual SourceFiles folder
+            # Scan and find the actual SourceFiles folder
+            self._log("Scanning folder structure...", "info")
             actual_source = self._find_source_folder(folder_path)
             if actual_source:
                 folder = str(actual_source)
@@ -341,10 +351,12 @@ class ConverterGUI:
 
             self.source_var.set(folder)
 
-            # Auto-detect pack name from the actual folder
-            folder_name = Path(folder).name
-            # Remove common suffixes
-            pack_name = folder_name.replace("_SourceFiles", "").replace("_Source", "")
+            # Auto-detect pack name from the ORIGINAL folder (not nested)
+            pack_name = original_folder_name
+            for suffix in ['_SourceFiles', '_Source_Files', '_Source', '_Files']:
+                pack_name = pack_name.replace(suffix, '')
+            # Remove version suffixes like _v1, _v2, _v3
+            pack_name = re.sub(r'_v\d+$', '', pack_name)
             self.pack_name_var.set(pack_name)
             self._log(f"Source folder: {folder}", "info")
             self._log(f"Detected pack: {pack_name}", "info")
@@ -417,9 +429,13 @@ class ConverterGUI:
         if actual_source != source_path:
             self.source_var.set(str(actual_source))
             self._log(f"Auto-detected SourceFiles: {actual_source.name}", "info")
-            # Update pack name from the actual folder
-            folder_name = actual_source.name
-            pack_name = folder_name.replace("_SourceFiles", "").replace("_Source", "")
+            # Update pack name from the PARENT folder (not the nested SourceFiles folder)
+            folder_name = source_path.name  # Use original folder, not nested
+            pack_name = folder_name
+            for suffix in ['_SourceFiles', '_Source_Files', '_Source', '_Files']:
+                pack_name = pack_name.replace(suffix, '')
+            # Remove version suffixes like _v1, _v2, _v3
+            pack_name = re.sub(r'_v\d+$', '', pack_name)
             self.pack_name_var.set(pack_name)
             self._log(f"Updated pack name: {pack_name}", "info")
 
@@ -499,6 +515,29 @@ class ConverterGUI:
 
             self._set_status("Initializing...", self.accent_color)
             self.progress_var.set(5)
+
+            # Check for nested SourceFiles folder (some packs have extra wrapper folder)
+            # e.g., POLYGON_Apocalypse_SourceFiles_v3/Source_Files/
+            self._log(f"Checking for nested source folders in: {source}", "info")
+            nested_candidates = [
+                source / 'SourceFiles',
+                source / 'Source_Files',
+            ]
+            for nested in nested_candidates:
+                self._log(f"  Checking: {nested} (exists={nested.exists()})", "info")
+                if nested.exists() and nested.is_dir():
+                    # Verify it has actual content (FBX or MaterialList)
+                    fbx_files = list(nested.glob('**/*.fbx'))[:1]
+                    mat_files = list(nested.glob('**/MaterialList*.txt'))
+                    self._log(f"    Found {len(fbx_files)}+ FBX, {len(mat_files)} MaterialList", "info")
+                    if fbx_files or mat_files:
+                        self._log(f"Using nested source folder: {nested}", "success")
+                        source = nested
+                        break
+
+            # Also check if MaterialList exists in current source
+            mat_check = list(source.glob('**/MaterialList*.txt'))
+            self._log(f"MaterialList files in source: {mat_check}", "info")
 
             # Create config
             # Find zip file (optional, for MaterialList fallback)
@@ -592,6 +631,14 @@ class SyntyConverterWithCallback(SyntyConverter):
             'skipped': [],
             'errors': [],
         }
+
+        # Scan all FBX files in source directory for fast lookup
+        self.prefab_gen.scan_fbx_files(self.config.source_dir)
+        self.log_callback(f"  Scanned {len(self.prefab_gen._fbx_file_cache)} FBX files", "info")
+
+        # Scan all textures in source directory for fast lookup
+        self.texture_copier.scan_textures(self.config.source_dir)
+        self.log_callback(f"  Scanned {len(self.texture_copier._texture_cache)} texture files", "info")
 
         # Step 1: Parse MaterialList
         self.log_callback("Parsing MaterialList...", "info")
