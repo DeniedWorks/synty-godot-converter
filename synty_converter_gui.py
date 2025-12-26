@@ -470,6 +470,7 @@ class ConverterGUI:
             normalize = self.normalize_size_var.get() if self.normalize_var.get() else None
             dry_run = self.dry_run_var.get()
             name_filter = self.filter_var.get().strip() or None
+            skip_existing = self.skip_existing_var.get()
 
             # Parse force scale (empty or 0 means None/auto)
             force_scale_str = self.force_scale_var.get().strip()
@@ -494,6 +495,8 @@ class ConverterGUI:
                 self._log(f"Size normalization: {normalize}m", "info")
             if name_filter:
                 self._log(f"Filter: {name_filter}", "info")
+            if skip_existing:
+                self._log("Skip existing: enabled", "info")
             if dry_run:
                 self._log("DRY RUN MODE - No files will be written", "warning")
             self._log("", "info")
@@ -559,7 +562,8 @@ class ConverterGUI:
                 force_scale=force_scale,
                 log_callback=self._log,
                 progress_callback=self._update_progress,
-                cancel_check=lambda: not self.is_converting
+                cancel_check=lambda: not self.is_converting,
+                skip_existing=skip_existing
             )
 
             self._set_status("Converting...", self.accent_color)
@@ -615,11 +619,12 @@ class SyntyConverterWithCallback(SyntyConverter):
     """Extended converter with progress callbacks for GUI."""
 
     def __init__(self, config, normalize_height=None, force_scale=None, log_callback=None,
-                 progress_callback=None, cancel_check=None):
+                 progress_callback=None, cancel_check=None, skip_existing=False):
         super().__init__(config, normalize_height, force_scale=force_scale)
         self.log_callback = log_callback or print
         self.progress_callback = progress_callback or (lambda x: None)
         self.cancel_check = cancel_check or (lambda: False)
+        self.skip_existing = skip_existing
 
     def convert(self, dry_run=False, name_filter=None):
         """Override convert with progress reporting."""
@@ -714,7 +719,7 @@ class SyntyConverterWithCallback(SyntyConverter):
         self.log_callback("\nGenerating prefabs...", "info")
 
         skip_patterns = ['FX_', 'LightRay_', 'WeatherControl', 'SyntyWeather',
-                        'SM_Env_Cloud_', 'SM_Env_Fog_', 'SM_Env_Skydome_']
+                        'SM_Env_Cloud_', 'SM_Env_Fog_', 'SM_Env_Skydome_', 'SM_Env_Grass_01']
 
         total_prefabs = len(prefabs)
         for i, prefab in enumerate(prefabs):
@@ -725,14 +730,22 @@ class SyntyConverterWithCallback(SyntyConverter):
             progress = 40 + (55 * (i / max(total_prefabs, 1)))
             self.progress_callback(progress)
 
-            # Skip patterns
-            if any(prefab.prefab_name.startswith(p) for p in skip_patterns):
+            # Skip patterns (check both prefix and exact match)
+            if any(prefab.prefab_name.startswith(p) or prefab.prefab_name == p for p in skip_patterns):
                 stats['skipped'].append(prefab.prefab_name)
                 continue
 
             if '_Collision' in prefab.prefab_name:
                 stats['skipped'].append(prefab.prefab_name)
                 continue
+
+            # Skip existing files if option is enabled
+            if self.skip_existing:
+                output_dir = self.config.project_root / "assets" / "synty" / self.config.pack_name / "prefabs" / prefab.category
+                output_path = output_dir / f"{prefab.prefab_name}.tscn"
+                if output_path.exists():
+                    stats['skipped'].append(prefab.prefab_name)
+                    continue
 
             try:
                 tscn_path, model_path = self.prefab_gen.write_prefab(

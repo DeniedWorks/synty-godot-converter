@@ -3143,6 +3143,12 @@ class SyntyConverter:
                 print(f"  Skipped: {prefab.prefab_name} (FX/effect)")
                 continue
 
+            # Skip collision-only prefabs (they're handled by auto-collision on FBX import)
+            if '_Collision' in prefab.prefab_name:
+                stats['skipped'].append(prefab.prefab_name)
+                print(f"  Skipped: {prefab.prefab_name} (collision-only)")
+                continue
+
             try:
                 # Check if this prefab should use emissive material
                 emissive_mat = prefab_emissive_map.get(prefab.prefab_name)
