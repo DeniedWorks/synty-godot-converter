@@ -44,6 +44,14 @@ TREE_FOLIAGE_CONFIG = {
     'EnchantedWillow_Mat_01': ('Leaves_Willow_01', 'Branches_01'),
     # Tree Ferns - uses same fern texture as regular ferns, trunk uses Branches
     'TreeFern_Mat_02': ('Fern_2_TGA', 'Branches_01'),
+
+    # === NatureBiomes MeadowForest trees ===
+    # Uses leafPatch textures with alpha cutout for proper leaf rendering
+    # Branches_01 = brown bark (general), Branches_02 = white bark (birch)
+    'Tree_Mat_01': ('leafPatch_01', 'Branches_01'),
+    'Tree_Mat_01_Small': ('leafPatch_01', 'Branches_01'),
+    'Tree_Mat_03': ('leafPatch_02', 'Branches_01'),  # Meadow trees use brown bark
+    'Tree_Birch_Mat_01': ('leafPatch_04', 'Branches_02'),  # Birch uses white bark
 }
 
 
@@ -640,6 +648,8 @@ class MaterialInfo:
     is_shiny: bool = False
     is_glass: bool = False
     trunk_texture_name: str = ""  # For foliage materials needing separate trunk texture
+    use_flat_color: bool = False  # For foliage materials using solid color instead of texture
+    leaf_color: tuple = (0.4, 0.5, 0.3)  # RGB for flat color mode
 
 
 # ============================================================================
@@ -740,6 +750,43 @@ class MaterialListParser:
         # === Enchanted Forest - Triplanar (use standard shader) ===
         'Dirt_Leaves_Triplanar_01': 'Dirt_Texture_Enchanted_01',
         'Moss_Enchanted_Triplanar_01': 'Moss_Enchanted_Texture_01',
+
+        # === NatureBiomes MeadowForest - Custom shader materials ===
+        # These use "(Uses custom shader)" in MaterialList but need the pack's main texture
+        'NoWind_Mat_01': 'PolygonNatureBiomes_Meadow_Texture_01',
+        'Kite_Mat_01': 'PolygonNatureBiomes_Meadow_Texture_01',
+        'Cloud_Mat_01': 'PolygonNatureBiomes_Meadow_Texture_01',
+        'Water_Mat_01': 'PolygonNatureBiomes_Meadow_Texture_01',
+        'Grass_Mat_01': 'Grass_Short_01',
+        'Bush_Mat_01': 'PolygonNatureBiomes_Meadow_Texture_01',
+        'Fern_Mat_01': 'PolygonNatureBiomes_Meadow_Texture_01',
+
+        # === NatureBiomes MeadowForest - Tree materials ===
+        # Uses leafPatch textures with alpha cutout for proper leaf rendering
+        'Tree_Mat_01': 'leafPatch_01',
+        'Tree_Mat_01_Small': 'leafPatch_01',
+        'Tree_Mat_03': 'leafPatch_02',
+        'Tree_Birch_Mat_01': 'leafPatch_04',
+
+        # === NatureBiomes MeadowForest - Card/LOD materials ===
+        'Card_Tree_Birch_01': 'treeBirch_01',
+        'Card_Tree_Birch_02': 'treeBirch_02',
+        'Card_Tree_Birch_03': 'treeBirch_03',
+        'Card_Tree_Fruit_01': 'treeFruit_01',
+        'Card_Tree_Fruit_02': 'treeFruit_02',
+        'Card_Tree_Fruit_03': 'treeFruit_03',
+        'Card_Tree_Meadow_01': 'treeMeadow_01',
+        'Card_Tree_Meadow_02': 'treeMeadow_02',
+        'Card_Sunflower_01': 'Sunflower_01',
+
+        # === NatureBiomes MeadowForest - Vegetation materials ===
+        'Sunflowers_Mat_01': 'Sunflower_01',
+        'Flowers_Flat_Mat_01': 'FlowersFlat_01',
+        'Grass_Tall_Mat_01': 'Grass_01',
+        'Grass_Med_Mat_01': 'Grass_Mid_01',
+        'Ground_Cover_Mat_01': 'GroundCover_01',
+        'Flowers_Field_Variation': 'flowerGroup_01',
+        'BASEMat_02_Saturated': 'PolygonNatureBiomes_Meadow_Texture_01_Saturated',
     }
 
     def _infer_texture_from_material(self, material_name: str, pack_prefix: str = "") -> str:
@@ -852,8 +899,16 @@ class MaterialListParser:
                 if material_name not in materials:
                     # Check if this is a tree foliage material that needs trunk texture
                     trunk_texture = ""
+                    use_flat_color = False
+                    leaf_color = (0.4, 0.5, 0.3)
                     if material_name in TREE_FOLIAGE_CONFIG:
-                        leaf_tex, trunk_tex = TREE_FOLIAGE_CONFIG[material_name]
+                        config = TREE_FOLIAGE_CONFIG[material_name]
+                        if len(config) == 2:
+                            # Old format: (leaf_texture, trunk_texture)
+                            leaf_tex, trunk_tex = config
+                        else:
+                            # New format: (leaf_texture, trunk_texture, use_flat_color, leaf_rgb)
+                            leaf_tex, trunk_tex, use_flat_color, leaf_color = config
                         texture_name = leaf_tex  # Override with correct leaf texture
                         trunk_texture = trunk_tex
 
@@ -862,7 +917,9 @@ class MaterialListParser:
                         texture_name=texture_name,
                         is_shiny="_Shiny" in material_name,
                         is_glass="_Glass" in material_name or "Glass" in material_name,
-                        trunk_texture_name=trunk_texture
+                        trunk_texture_name=trunk_texture,
+                        use_flat_color=use_flat_color,
+                        leaf_color=leaf_color
                     )
 
         # Don't forget the last prefab
@@ -1286,6 +1343,26 @@ shader_parameter/enable_light_wind = {enable_light_wind}
 shader_parameter/light_wind_strength = {light_wind_strength}
 '''
 
+    # Foliage material using flat color (no texture) - for packs without proper leaf textures
+    FOLIAGE_FLAT_COLOR_TEMPLATE = '''\
+[gd_resource type="ShaderMaterial" load_steps=3 format=3]
+
+[ext_resource type="Shader" path="{shader_path}" id="1"]
+[ext_resource type="Texture2D" path="{trunk_texture_path}" id="2"]
+
+[resource]
+resource_name = "{material_name}"
+shader = ExtResource("1")
+shader_parameter/leaf_flat_color = true
+shader_parameter/leaf_base_color = Color({leaf_r}, {leaf_g}, {leaf_b}, 1.0)
+shader_parameter/trunk_color = ExtResource("2")
+shader_parameter/alpha_clip_threshold = 0.0
+shader_parameter/enable_breeze = {enable_breeze}
+shader_parameter/breeze_strength = {breeze_strength}
+shader_parameter/enable_light_wind = {enable_light_wind}
+shader_parameter/light_wind_strength = {light_wind_strength}
+'''
+
     # Water material with wave animation
     WATER_TEMPLATE = '''\
 [gd_resource type="ShaderMaterial" load_steps=2 format=3]
@@ -1448,35 +1525,10 @@ shader_parameter/emission_color_tint = Color(1, 1, 1, 1)
         if any(x in name for x in ['water', 'ocean', 'river', 'lake', 'pond']):
             return 'water'
 
-        # Foliage shader ONLY for actual trees with vertex color encoding
-        # These are Synty tree materials that have proper COLOR.b vertex encoding
-        tree_canopy_keywords = [
-            'tree', 'blossom', 'canopy',  # Generic tree terms
-            'pine', 'maple', 'ginko', 'cherry', 'oak', 'willow', 'birch',  # Deciduous
-            'palm', 'cypress', 'fir', 'spruce', 'cedar', 'redwood',  # Evergreen
-        ]
-
-        # Materials that should NOT use foliage shader even if they match tree keywords
-        static_exclusions = [
-            # Ground/pile items (static decorations)
-            'ground', 'floor', 'pile', 'heavy', 'cutout', 'small',
-            # Non-tree foliage (no vertex colors)
-            'vine', 'ivy', 'fern', 'grass', 'bush', 'shrub', 'hedge',
-            # Tree parts without vertex color encoding
-            'bark', 'trunk', 'branch', 'log', 'wood', 'stump', 'root',
-            # Non-foliage items that may contain tree keywords
-            'fire', 'flame', 'door', 'frame', 'particle', 'effect', 'fx',
-            # Standalone leaf textures (not tree canopies)
-            'leaf_01', 'leaf_02', 'leaf_03',
-            # LOD billboard/card materials (no vertex color encoding)
-            'card',
-        ]
-
-        # Only use foliage shader if material contains tree keyword AND no exclusions
-        if any(x in name for x in tree_canopy_keywords) and \
-           not any(x in name for x in static_exclusions):
-            return 'foliage'
-
+        # Foliage shader ONLY for materials explicitly in TREE_FOLIAGE_CONFIG
+        # These are the only materials confirmed to have proper COLOR.b vertex encoding
+        # Keyword-based detection was removed as it caused false positives for packs
+        # like MeadowForest that use solid geometry trees with the main atlas
         return 'standard'
 
     def generate(
@@ -1535,8 +1587,6 @@ shader_parameter/emission_color_tint = Color(1, 1, 1, 1)
         # Foliage uses foliage.gdshader for wind animation and alpha cutout
         # Synty models have vertex colors for leaf/trunk detection
         if mat_type == 'foliage':
-            leaf_texture_path = texture_path  # Already resolved above
-
             # Get trunk texture path (use Branches_01 as default for trees)
             trunk_texture = material.trunk_texture_name or 'Branches_01'
             if texture_filename_map and trunk_texture in texture_filename_map:
@@ -1545,6 +1595,22 @@ shader_parameter/emission_color_tint = Color(1, 1, 1, 1)
                 trunk_filename = f"{trunk_texture}.tga"
             trunk_texture_path = f"{config.res_base}/Textures/{trunk_filename}"
 
+            # Check if this material uses flat color mode (no leaf texture)
+            if material.use_flat_color:
+                return self.FOLIAGE_FLAT_COLOR_TEMPLATE.format(
+                    material_name=material.material_name,
+                    trunk_texture_path=trunk_texture_path,
+                    shader_path=self.FOLIAGE_SHADER,
+                    leaf_r=material.leaf_color[0],
+                    leaf_g=material.leaf_color[1],
+                    leaf_b=material.leaf_color[2],
+                    enable_breeze='true',
+                    breeze_strength=0.2,
+                    enable_light_wind='true',
+                    light_wind_strength=0.15,
+                )
+
+            leaf_texture_path = texture_path  # Already resolved above
             return self.FOLIAGE_TEMPLATE.format(
                 material_name=material.material_name,
                 leaf_texture_path=leaf_texture_path,
@@ -2498,6 +2564,28 @@ class TextureCopier:
     def __init__(self):
         # Maps material texture_name -> actual copied filename
         self.texture_filename_map: dict[str, str] = {}
+        # Cache of texture stem (lowercase) -> full Path for fast lookup
+        self._texture_cache: dict[str, Path] = {}
+
+    def scan_textures(self, source_dir: Path) -> None:
+        """
+        Scan source directory for all texture files and cache their paths.
+        This enables fast lookups regardless of subfolder structure.
+        """
+        self._texture_cache.clear()
+
+        textures_dir = source_dir / "Textures"
+        search_dirs = [textures_dir, source_dir] if textures_dir.exists() else [source_dir]
+
+        for search_dir in search_dirs:
+            for ext in ['*.png', '*.tga', '*.jpg', '*.jpeg']:
+                for tex_path in search_dir.glob(f"**/{ext}"):
+                    stem_lower = tex_path.stem.lower()
+                    # Store by stem (without extension) - first occurrence wins
+                    if stem_lower not in self._texture_cache:
+                        self._texture_cache[stem_lower] = tex_path
+
+        print(f"  Scanned {len(self._texture_cache)} texture files")
 
     def _find_texture_recursive(self, textures_dir: Path, tex_name: str) -> Path | None:
         """Search for a texture file recursively in the textures directory."""
@@ -2554,6 +2642,36 @@ class TextureCopier:
 
             return 0  # No meaningful match
 
+        # Step 0: Check the texture cache first (fastest lookup)
+        if self._texture_cache:
+            tex_lower = tex_name.lower()
+
+            # Try exact match in cache
+            if tex_lower in self._texture_cache:
+                path = self._texture_cache[tex_lower]
+                if not is_normal_map(path.stem):
+                    return path
+
+            # Try with _TGA suffix (common in Synty packs)
+            tga_name = f"{tex_lower}_tga"
+            if tga_name in self._texture_cache:
+                path = self._texture_cache[tga_name]
+                if not is_normal_map(path.stem):
+                    return path
+
+            # Fuzzy match using scoring - find best match in cache
+            best_score = 0
+            best_path = None
+            for cached_name, cached_path in self._texture_cache.items():
+                score = score_match(cached_path.stem, tex_name)
+                if score > best_score:
+                    best_score = score
+                    best_path = cached_path
+
+            if best_score >= 70:  # Good enough match threshold
+                return best_path
+
+        # Fallback to glob-based search if cache miss or not populated
         # Prefer TGA (usually has alpha for cutout) over PNG
         extensions = ['.tga', '.png', '.jpg']
 
@@ -2752,6 +2870,9 @@ class SyntyConverter:
         self.prefab_gen.scan_fbx_files(self.config.source_dir)
         print(f"  Scanned {len(self.prefab_gen._fbx_file_cache)} FBX files")
 
+        # Scan all textures in source directory for fast lookup (handles subfolders)
+        self.texture_copier.scan_textures(self.config.source_dir)
+
         # Step 1: Parse MaterialList (try source directory first, then zip)
         print("Parsing MaterialList...")
         try:
@@ -2810,6 +2931,9 @@ class SyntyConverter:
         # Materials that don't need textures (use color/procedural shaders)
         def needs_texture(mat: MaterialInfo) -> bool:
             if mat.is_glass:
+                return False
+            # Flat-color foliage materials don't need leaf texture lookup
+            if getattr(mat, 'use_flat_color', False):
                 return False
             name_lower = mat.material_name.lower()
             # Water materials use color-based shader
