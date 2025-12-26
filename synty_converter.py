@@ -52,6 +52,52 @@ TREE_FOLIAGE_CONFIG = {
     'Tree_Mat_01_Small': ('leafPatch_01', 'Branches_01'),
     'Tree_Mat_03': ('leafPatch_02', 'Branches_01'),  # Meadow trees use brown bark
     'Tree_Birch_Mat_01': ('leafPatch_04', 'Branches_02'),  # Birch uses white bark
+
+    # === NatureBiomes AlpineMountain trees ===
+    'AlpineTree_Mat_01_Vibrant': ('Pine_02_Vibrant', 'Branches_01'),
+    'AlpineTree_Mat_02_Vibrant': ('Pine_cluster_01_Vibrant', 'Branches_01'),
+    'AlpineTree_Mat_02': ('Pine_02', 'Branches_01'),
+
+    # === NatureBiomes SwampMarshland trees ===
+    'Tree_Swamp_Mat_01': ('leafPatch_05', 'Branches_01'),
+    'Tree_Mangrove_Mat_01': ('leafPatch_07', 'Branches_01'),
+
+    # === NatureBiomes TropicalJungle trees ===
+    'Tree_Mat_02': ('leafPatch', 'Branches_01'),
+    'Tree_Mat_02_Small': ('leafPatch', 'Branches_01'),
+    'Palm_Mat_01': ('Leaf_Palm_01', 'Palm_Bark_01'),
+    'Palm_Mat_02': ('Leaf_Palm_01', 'Palm_Bark_02'),
+    'Palm_Mat_04': ('Leaf_Fan', 'Palm_Bark_01'),
+    'Palm_Mat_06': ('Leaf_Fern_01', 'Palm_Bark_01'),
+    'Palm_Mat_07': ('Leaf_Banana_01', 'Palm_Bark_01'),
+    'Palm_Red_Mat_01': ('Leaf_Palm_01', 'Palm_Bark_01'),
+    'Pohutukawa_Mat_01': ('Leaf_Detailed_01', 'Branches_01'),
+
+    # === POLYGON_Nature trees ===
+    'PolygonNature_Tree': ('Leaves_Generic_Texture', 'PolygonNature_01'),
+    'PolygonNature_Tree_Dead': ('Tree_Dead_Branch', 'PolygonNature_01'),
+    'PolygonNature_Swamp_Tree': ('Leaves_Willow_Texture', 'PolygonNature_01'),
+    # Generic leaves (birch, oak, etc.)
+    'PolygonNature_Leaves_Base': ('Leaves_Generic_Texture', 'PolygonNature_01'),
+    'PolygonNature_Leaves_Base_LOD_01': ('Leaves_Generic_Texture', 'PolygonNature_01'),
+    # Pine trees
+    'PolygonNature_Leaves_Pine': ('Leaves_Pine_Texture', 'PolygonNature_01'),
+    'PolygonNature_Leaves_Pine_LOD_01': ('Leaves_Pine_Texture', 'PolygonNature_01'),
+    # Willow trees
+    'PolygonNature_Leaves_Willow': ('Leaves_Willow_Texture', 'PolygonNature_01'),
+    'PolygonNature_Leaves_Willow_LOD_01': ('Leaves_Willow_Texture', 'PolygonNature_01'),
+    # Ferns
+    'PolygonNature_Fern': ('Fern_Texture', 'PolygonNature_01'),
+    'PolygonNature_Leaves_Fern_LOD_01': ('Fern_Texture', 'PolygonNature_01'),
+    # Undergrowth
+    'PolygonNature_Undergrowth': ('Undergrowth_Texture', 'PolygonNature_01'),
+    'PolygonNature_Leaves_Undergrowth_LOD_01': ('Undergrowth_Texture', 'PolygonNature_01'),
+    # Flower bushes
+    'PolygonNature_FlowerBush': ('FlowerBush_Texture', 'PolygonNature_01'),
+    'PolygonNature_Leaves_FlowerBush_LOD_01': ('FlowerBush_Texture', 'PolygonNature_01'),
+    # Vines and general plants
+    'PolygonNature_Vines': ('Leaves_Generic_Texture', 'PolygonNature_01'),
+    'PolygonNature_Plants': ('Leaves_Generic_Texture', 'PolygonNature_01'),
 }
 
 
@@ -787,6 +833,100 @@ class MaterialListParser:
         'Ground_Cover_Mat_01': 'GroundCover_01',
         'Flowers_Field_Variation': 'flowerGroup_01',
         'BASEMat_02_Saturated': 'PolygonNatureBiomes_Meadow_Texture_01_Saturated',
+
+        # === NatureBiomes AlpineMountain ===
+        'AlpineTree_01_Card': 'TreePine_01',
+        'AlpineTree_02_Card': 'TreePine_02',
+        'AlpineTree_03_Card': 'TreePine_03',
+        'AlpineTree_04_Card': 'pine04',
+        'AlpineTree_05_Card': 'pine05',
+        'Alpine_LOD_Mat_01': 'PolygonNatureBiomesS2_Alpine_Texture_01',
+        'PolygonNatureBiomes_Alpine_Mat_01': 'PolygonNatureBiomesS2_Alpine_Texture_01',
+        'AlpineTree_Mat_01_Vibrant': 'Pine_02_Vibrant',
+        'AlpineTree_Mat_02_Vibrant': 'Pine_cluster_01_Vibrant',
+        'AlpineTree_Mat_02': 'Pine_02',
+
+        # === NatureBiomes AridDesert ===
+        'PolygonNatureBiomes_AridDesert_Mat_01': 'PolygonNatureBiomesS2_AridDesert_Texture_01',
+        'PolygonNatureBiomes_AridDesert_Mat_02_A': 'PolygonNatureBiomesS2_AridDesert_Texture_02_A',
+        'AridDesert_GroundCover_01': 'AridDesert_GroundCover_01',
+        'Fish_Mat_01': 'PolygonNatureBiomesS2_AridDesert_Texture_01',
+
+        # === NatureBiomes SwampMarshland ===
+        'PolygonNatureBiomesSwamp_Mat_01': 'PolygonNatureBiomes_Swamp_Texture_01',
+        'PolygonNatureBiomesSwamp_LODs_Mat_01': 'PolygonNatureBiomes_Swamp_Texture_02',
+        'SwampGrass_Base': 'SwampGrass_01',
+        'ToeToe_Material_01': 'ToeToe_Leaf_01',
+        'Moss_Mat_01': 'PolygonNatureBiomes_Swamp_Texture_01',
+        'Tree_Swamp_Mat_01': 'leafPatch_05',
+        'Tree_Mangrove_Mat_01': 'leafPatch_07',
+        'Card_Tree_Swamp_01': 'treeSwamp_01',
+        'Card_Tree_Swamp_02': 'treeSwamp_02',
+        'Card_Tree_Swamp_03': 'treeSwamp_03',
+        'Card_Tree_Swamp_04': 'treeSwamp_04',
+        'Card_Tree_Mangrove_01': 'treeMangrove_01',
+        'Card_Tree_Mangrove_02': 'treeMangrove_02',
+        'Card_Tree_Mangrove_03': 'treeMangrove_03',
+
+        # === NatureBiomes TropicalJungle ===
+        'PolygonNatureBiomesTropical_Mat_01': 'PolygonNatureBiomes_Tropical_Texture_01',
+        'BASEMat_01': 'PolygonNatureBiomes_Tropical_Texture_01',
+        'Seaweed_Mat_01': 'Seaweed_Sand_Texture_01',
+        'Flowers_Plant_Mat_01': 'FlowersFlat_01',
+        'Tree_Mat_02': 'leafPatch',
+        'Tree_Mat_02_Small': 'leafPatch',
+        'Palm_Mat_01': 'Leaf_Palm_01',
+        'Palm_Mat_02': 'Leaf_Palm_01',
+        'Palm_Mat_04': 'Leaf_Fan',
+        'Palm_Mat_06': 'Leaf_Fern_01',
+        'Palm_Mat_07': 'Leaf_Banana_01',
+        'Palm_Red_Mat_01': 'Leaf_Palm_01',
+        'Pohutukawa_Mat_01': 'Leaf_Detailed_01',
+        'Card_Tree_Palm_01': 'treePalm_01',
+        'Card_Tree_Palm_02': 'treePalm_02',
+        'Card_Tree_Forest_01': 'treeForest_01',
+        'Card_Tree_Forest_02': 'treeForest_02',
+        'Card_Tree_Forest_03': 'treeForest_03',
+        'Card_Tree_Banana_01': 'treeBanana_01',
+        'Card_Tree_Pohutukawa_01': 'treePohutukawa_01',
+        'Card_Tree_Pohutukawa_02': 'treePohutukawa_02',
+        'Card_Tree_Pohutukawa_03': 'treePohutukawa_03',
+        'Card_Tree_Pohutukawa_04': 'treePohutukawa_04',
+        'Card_Bush_Palm_01': 'bushPalm_01',
+
+        # === POLYGON_Nature ===
+        'PolygonNature_Tree': 'Leaves_Generic_Texture',
+        'PolygonNature_Tree_Dead': 'Tree_Dead_Branch',
+        'PolygonNature_Tree_Trunk': 'PolygonNature_01',
+        'PolygonNature_Tree_TrunkDead': 'PolygonNature_01',
+        'PolygonNature_Birch_Trunk': 'Birch_Trunk_Texture',
+        'PolygonNature_Tree_Dead_Trunk_LOD_01': 'Tree_Dead_Branch',
+        'PolygonNature_Swamp_Tree': 'Leaves_Willow_Texture',
+        'PolygonNature_Swamp_Growth': 'PolygonNature_01',
+        # Generic leaves
+        'PolygonNature_Leaves_Base': 'Leaves_Generic_Texture',
+        'PolygonNature_Leaves_Base_LOD_01': 'Leaves_Generic_Texture',
+        # Pine trees
+        'PolygonNature_Leaves_Pine': 'Leaves_Pine_Texture',
+        'PolygonNature_Leaves_Pine_LOD_01': 'Leaves_Pine_Texture',
+        # Willow trees
+        'PolygonNature_Leaves_Willow': 'Leaves_Willow_Texture',
+        'PolygonNature_Leaves_Willow_LOD_01': 'Leaves_Willow_Texture',
+        # Ferns
+        'PolygonNature_Fern': 'Fern_Texture',
+        'PolygonNature_Leaves_Fern_LOD_01': 'Fern_Texture',
+        # Undergrowth
+        'PolygonNature_Undergrowth': 'Undergrowth_Texture',
+        'PolygonNature_Leaves_Undergrowth_LOD_01': 'Undergrowth_Texture',
+        # Flower bushes
+        'PolygonNature_FlowerBush': 'FlowerBush_Texture',
+        'PolygonNature_Leaves_FlowerBush_LOD_01': 'FlowerBush_Texture',
+        # Vines and general plants
+        'PolygonNature_Vines': 'Leaves_Generic_Texture',
+        'PolygonNature_Plants': 'Leaves_Generic_Texture',
+        # Overlay materials (moss/snow on rocks)
+        'PolygonNature_Moss': 'Moss',
+        'PolygonNature_Snow': 'Snow',
     }
 
     def _infer_texture_from_material(self, material_name: str, pack_prefix: str = "") -> str:
