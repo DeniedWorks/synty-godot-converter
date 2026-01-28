@@ -162,98 +162,29 @@ class SyntyConverter:
             logger.info(f"  {mat_type.name}: {len(names)} materials")
 
     def _generate_materials(self):
-        """Generate .tres material files using FBX material names.
-
-        The key insight: Godot's FBX importer looks for materials by the name
-        used IN the FBX file. Unity's .meta files tell us exactly what those
-        names are (in externalObjects), mapped to Unity material GUIDs.
-
-        So we generate: FBX_material_name.tres with Unity material properties.
-        """
-        # Get FBX material name -> Unity GUID mappings from .meta files
-        if self.unity_extractor and self.unity_extractor.fbx_material_mappings:
-            # Use FBX material names (the correct approach)
-            self._generate_materials_from_meta()
-        else:
-            # Fallback: use Unity names directly (won't match FBX imports)
-            self._generate_materials_unity_names()
-
-    def _generate_materials_from_meta(self):
-        """Generate materials using FBX names from .meta files."""
-        generated = set()
-
-        for fbx_name, mappings in self.unity_extractor.fbx_material_mappings.items():
-            for fbx_mat_name, unity_guid in mappings.items():
-                # Skip if already generated (same mat name in multiple FBXs)
-                if fbx_mat_name in generated:
-                    continue
-
-                try:
-                    # Get Unity material info by GUID
-                    mat_info = self.unity_extractor.materials_by_guid.get(unity_guid)
-
-                    if mat_info:
-                        # Classify based on Unity material
-                        mat_type = self.classifier.classify(mat_info.name, mat_info)
-
-                        # Build texture map
-                        texture_map = self.texture_copier.build_texture_map(mat_info.name)
-                        if mat_info.resolved_textures:
-                            for prop, filename in mat_info.resolved_textures.items():
-                                prop_lower = prop.lower()
-                                if "albedo" in prop_lower or "maintex" in prop_lower:
-                                    texture_map.setdefault("albedo", filename)
-                                elif "leaf" in prop_lower:
-                                    texture_map.setdefault("leaf", filename)
-                                elif "trunk" in prop_lower:
-                                    texture_map.setdefault("trunk", filename)
-                                elif "emission" in prop_lower:
-                                    texture_map.setdefault("emission", filename)
-                                elif "normal" in prop_lower or "bump" in prop_lower:
-                                    texture_map.setdefault("normal", filename)
-                    else:
-                        # GUID not found - create basic material
-                        mat_type = MaterialType.STANDARD
-                        texture_map = {}
-                        logger.warning(f"No Unity material for GUID {unity_guid}, creating basic: {fbx_mat_name}")
-
-                    # Generate with FBX material name (what Godot expects!)
-                    output_path = self.material_generator.write_material(
-                        fbx_mat_name, mat_type, mat_info, texture_map
-                    )
-                    self.generated_materials[fbx_mat_name] = output_path
-                    self.material_classifications[fbx_mat_name] = mat_type  # Store type under FBX name
-                    generated.add(fbx_mat_name)
-
-                    logger.debug(f"Generated {fbx_mat_name}.tres from Unity material {mat_info.name if mat_info else 'unknown'}")
-
-                except Exception as e:
-                    logger.error(f"Failed to generate material {fbx_mat_name}: {e}")
-
-        logger.info(f"Generated {len(self.generated_materials)} material files (using FBX names from .meta)")
-
-    def _generate_materials_unity_names(self):
-        """Fallback: Generate materials using Unity names."""
+        """Generate .tres material files for all classified materials."""
         for mat_name, mat_type in self.material_classifications.items():
             try:
                 mat_info = None
                 if self.unity_extractor:
                     mat_info = self.unity_extractor.materials.get(mat_name)
 
+                # Build texture map from copier
                 texture_map = self.texture_copier.build_texture_map(mat_name)
 
+                # Also use resolved textures from Unity if available
                 if mat_info and mat_info.resolved_textures:
                     for prop, filename in mat_info.resolved_textures.items():
-                        prop_lower = prop.lower()
-                        if "albedo" in prop_lower or "maintex" in prop_lower:
+                        # Map Unity property names to generic names
+                        if "albedo" in prop.lower() or "maintex" in prop.lower():
                             texture_map.setdefault("albedo", filename)
-                        elif "leaf" in prop_lower:
+                        elif "leaf" in prop.lower():
                             texture_map.setdefault("leaf", filename)
-                        elif "trunk" in prop_lower:
+                        elif "trunk" in prop.lower():
                             texture_map.setdefault("trunk", filename)
-                        elif "emission" in prop_lower:
+                        elif "emission" in prop.lower():
                             texture_map.setdefault("emission", filename)
-                        elif "normal" in prop_lower or "bump" in prop_lower:
+                        elif "normal" in prop.lower() or "bump" in prop.lower():
                             texture_map.setdefault("normal", filename)
 
                 output_path = self.material_generator.write_material(
@@ -264,7 +195,7 @@ class SyntyConverter:
             except Exception as e:
                 logger.error(f"Failed to generate material {mat_name}: {e}")
 
-        logger.info(f"Generated {len(self.generated_materials)} material files (using Unity names)")
+        logger.info(f"Generated {len(self.generated_materials)} material files")
 
     def _process_models(self) -> tuple[int, int]:
         """Copy FBX files and generate import configurations."""
@@ -300,14 +231,12 @@ class SyntyConverter:
                 model_count += 1
 
                 # Build material mappings for import file
-                # Use the generated materials (which now have FBX names as keys)
+                # For now, use all generated materials (could be smarter with FBX analysis)
                 materials_rel = self.config.materials_dir.relative_to(self.config.godot_project_path)
 
                 mat_mappings = {}
-                for mat_name in self.generated_materials.keys():
+                for mat_name, mat_type in self.material_classifications.items():
                     tres_path = f"res://{materials_rel.as_posix()}/{mat_name}.tres"
-                    # Get type from classifications if available, else STANDARD
-                    mat_type = self.material_classifications.get(mat_name, MaterialType.STANDARD)
                     mat_mappings[mat_name] = (tres_path, mat_type)
 
                 # Extract mesh name from FBX filename

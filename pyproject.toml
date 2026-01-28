@@ -4,15 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "synty-converter-v2"
-version = "2.1.0"
-description = "Convert Synty Unity assets to Godot format with GUI, Blender integration, and accurate GUID-based material matching"
+version = "2.0.0"
+description = "Convert Synty Unity assets to Godot format"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
     {name = "Synty Converter Team"}
 ]
-keywords = ["synty", "godot", "unity", "asset", "converter", "fbx", "materials", "blender"]
+keywords = ["synty", "godot", "unity", "asset", "converter"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",

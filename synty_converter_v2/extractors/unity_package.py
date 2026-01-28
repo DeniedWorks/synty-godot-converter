@@ -13,15 +13,6 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class FBXMaterialMapping:
-    """Material mapping information from an FBX .meta file."""
-    fbx_name: str  # Name of the FBX file (without extension)
-    fbx_guid: str  # GUID of the FBX asset
-    # Maps FBX material name -> Unity material GUID
-    material_mappings: dict[str, str] = field(default_factory=dict)
-
-
-@dataclass
 class TextureInfo:
     """Information about a texture asset."""
     guid: str
@@ -93,13 +84,8 @@ class UnityPackageExtractor:
         # GUID -> asset info mappings
         self.guid_to_path: dict[str, str] = {}
         self.materials: dict[str, MaterialInfo] = {}  # name -> MaterialInfo
-        self.materials_by_guid: dict[str, MaterialInfo] = {}  # guid -> MaterialInfo
         self.textures: dict[str, TextureInfo] = {}  # guid -> TextureInfo
         self.fbx_files: list[tuple[str, Path]] = []  # [(original_path, extracted_path)]
-        # FBX material mappings from .meta files
-        # Key: FBX filename (without extension)
-        # Value: dict mapping FBX material name -> Unity material GUID
-        self.fbx_material_mappings: dict[str, dict[str, str]] = {}
 
     def extract(self) -> Path:
         """Extract the Unity package and parse all assets."""
@@ -114,14 +100,10 @@ class UnityPackageExtractor:
         # Parse all .mat files for material info
         self._parse_materials()
 
-        # Parse FBX .meta files for material mappings
-        self._parse_fbx_meta_files()
-
         # Resolve texture GUIDs to filenames
         self._resolve_texture_guids()
 
         logger.info(f"Found {len(self.materials)} materials, {len(self.textures)} textures, {len(self.fbx_files)} FBX files")
-        logger.info(f"Found {len(self.fbx_material_mappings)} FBX files with material mappings")
 
         return self.extract_dir
 
@@ -185,7 +167,6 @@ class UnityPackageExtractor:
                     mat_info = self._parse_mat_file(asset_file, guid, path)
                     if mat_info:
                         self.materials[mat_info.name] = mat_info
-                        self.materials_by_guid[guid] = mat_info
                 except Exception as e:
                     logger.warning(f"Failed to parse material {path}: {e}")
 
@@ -265,124 +246,6 @@ class UnityPackageExtractor:
                 tag_match = re.match(r'\s*(\w+):\s*(.+)', line)
                 if tag_match:
                     mat_info.tags[tag_match.group(1)] = tag_match.group(2).strip()
-
-    def _parse_fbx_meta_files(self):
-        """Parse FBX .meta files to extract material mappings.
-
-        Unity FBX .meta files contain an externalObjects section that maps
-        FBX material names to Unity material GUIDs:
-
-        externalObjects:
-          - first:
-              type: UnityEngine:Material
-              name: MAT_01A              # FBX material name
-            second: {guid: abc123def456}  # Unity material GUID
-        """
-        for guid_dir in self.extract_dir.iterdir():
-            if not guid_dir.is_dir():
-                continue
-
-            guid = guid_dir.name
-            pathname_file = guid_dir / "pathname"
-            meta_file = guid_dir / "asset.meta"
-
-            if not pathname_file.exists():
-                continue
-
-            path = pathname_file.read_text(encoding='utf-8').strip()
-
-            # Only process FBX .meta files
-            if not path.lower().endswith('.fbx'):
-                continue
-
-            if not meta_file.exists():
-                continue
-
-            try:
-                fbx_name = Path(path).stem
-                mappings = self._parse_fbx_meta_content(meta_file)
-
-                if mappings:
-                    self.fbx_material_mappings[fbx_name] = mappings
-                    logger.debug(f"Parsed {len(mappings)} material mappings from {fbx_name}.fbx.meta")
-
-            except Exception as e:
-                logger.warning(f"Failed to parse FBX meta file for {path}: {e}")
-
-    def _parse_fbx_meta_content(self, meta_file: Path) -> dict[str, str]:
-        """Parse the externalObjects section from an FBX .meta file.
-
-        Returns:
-            dict mapping FBX material name -> Unity material GUID
-        """
-        content = meta_file.read_text(encoding='utf-8', errors='ignore')
-        mappings = {}
-
-        # The externalObjects section contains entries like:
-        # - first:
-        #     type: UnityEngine:Material
-        #     name: MAT_01A
-        #   second: {fileID: 2100000, guid: abc123def456, type: 2}
-        #
-        # We need to find Material type entries and extract name + guid
-
-        # Pattern to match each externalObjects entry
-        # This handles the YAML-like format (not strict YAML)
-        entry_pattern = re.compile(
-            r'-\s*first:\s*\n'
-            r'\s*type:\s*UnityEngine:Material\s*\n'
-            r'\s*(?:assembly:\s*\S+\s*\n)?'  # Optional assembly line
-            r'\s*name:\s*([^\n]+)\s*\n'
-            r'\s*second:\s*\{[^}]*guid:\s*([a-f0-9]+)',
-            re.MULTILINE | re.IGNORECASE
-        )
-
-        for match in entry_pattern.finditer(content):
-            mat_name = match.group(1).strip()
-            mat_guid = match.group(2).strip()
-            mappings[mat_name] = mat_guid
-            logger.debug(f"  Found mapping: {mat_name} -> {mat_guid}")
-
-        return mappings
-
-    def get_material_by_guid(self, guid: str) -> Optional[MaterialInfo]:
-        """Get material info by GUID."""
-        return self.materials_by_guid.get(guid)
-
-    def get_fbx_material_mapping(self, fbx_name: str) -> Optional[dict[str, str]]:
-        """Get material mappings for an FBX file.
-
-        Args:
-            fbx_name: FBX filename without extension
-
-        Returns:
-            dict mapping FBX material name -> Unity material GUID, or None
-        """
-        return self.fbx_material_mappings.get(fbx_name)
-
-    def get_all_fbx_material_names(self) -> set[str]:
-        """Get all unique FBX material names from .meta file mappings.
-
-        This is the primary source of FBX material names - no Blender needed!
-        The externalObjects section in FBX .meta files contains the exact
-        material names as they appear in the FBX file.
-
-        Returns:
-            Set of all FBX material names found in externalObjects sections.
-        """
-        all_names = set()
-        for mappings in self.fbx_material_mappings.values():
-            all_names.update(mappings.keys())
-        return all_names
-
-    def get_fbx_materials_dict(self) -> dict[str, list[str]]:
-        """Get FBX material names organized by FBX file.
-
-        Returns:
-            Dict mapping FBX filename (without extension) to list of material names.
-        """
-        return {fbx: list(mappings.keys())
-                for fbx, mappings in self.fbx_material_mappings.items()}
 
     def _resolve_texture_guids(self):
         """Resolve texture GUIDs in materials to actual filenames."""
