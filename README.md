@@ -30,8 +30,8 @@ Synty Asset Converter v2 automates the process of migrating Synty's popular low-
 
 ```bash
 # Clone or download the converter
-git clone https://github.com/your-username/synty-converter-v2.git
-cd synty-converter-v2
+git clone https://github.com/DeniedWorks/synty-godot-converter.git
+cd synty-godot-converter
 
 # Install in development mode (recommended)
 pip install -e .
