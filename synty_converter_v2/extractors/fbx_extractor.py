@@ -4,12 +4,31 @@ import subprocess
 import json
 import tempfile
 import sys
+import re
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def clean_material_name(name: str) -> str:
+    """Clean a material name by removing Blender-added suffixes.
+
+    Blender adds suffixes like .001, .002, etc. when importing FBX files
+    if there are name collisions. This strips those suffixes to get the
+    original material name from the FBX.
+
+    Args:
+        name: Material name potentially with Blender suffix
+
+    Returns:
+        Cleaned material name without the suffix
+    """
+    # Pattern matches .001, .002, etc. at the end of the name
+    cleaned = re.sub(r'\.\d{3}$', '', name)
+    return cleaned
 
 
 @dataclass
@@ -26,7 +45,8 @@ class FBXInfo:
     """Information extracted from an FBX file."""
     path: Path
     meshes: list[MeshInfo] = field(default_factory=list)
-    materials: list[str] = field(default_factory=list)  # All unique material names in FBX
+    materials: list[str] = field(default_factory=list)  # All unique material names in FBX (cleaned)
+    raw_materials: list[str] = field(default_factory=list)  # Original material names before cleaning
 
     @property
     def name(self) -> str:
@@ -205,15 +225,32 @@ print(f"Extracted: {len(info['meshes'])} meshes, {len(info['materials'])} materi
 
             info = FBXInfo(path=fbx_path)
 
+            # Store raw materials before cleaning
+            raw_materials = data.get("materials", [])
+            info.raw_materials = raw_materials
+
+            # Clean material names (remove Blender .001, .002 suffixes)
+            cleaned_materials = []
+            seen_cleaned = set()
+            for mat_name in raw_materials:
+                cleaned = clean_material_name(mat_name)
+                if cleaned not in seen_cleaned:
+                    cleaned_materials.append(cleaned)
+                    seen_cleaned.add(cleaned)
+
+            info.materials = cleaned_materials
+
             for mesh_data in data.get("meshes", []):
+                # Clean material names in mesh info too
+                mesh_materials = [
+                    clean_material_name(m) for m in mesh_data.get("materials", [])
+                ]
                 info.meshes.append(MeshInfo(
                     name=mesh_data["name"],
                     vertex_count=mesh_data.get("vertex_count", 0),
                     face_count=mesh_data.get("face_count", 0),
-                    materials=mesh_data.get("materials", [])
+                    materials=mesh_materials
                 ))
-
-            info.materials = data.get("materials", [])
 
             return info
 

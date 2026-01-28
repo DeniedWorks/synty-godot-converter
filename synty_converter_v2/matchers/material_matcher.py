@@ -33,16 +33,73 @@ class MaterialMatcher:
         'M_', 'Mat_', 'MAT_',
     ]
 
-    def __init__(self, unity_materials: dict[str, any]):
+    def __init__(self, unity_materials: dict[str, any], materials_by_guid: dict[str, any] = None):
         """
         Initialize with Unity materials.
 
         Args:
             unity_materials: Dict mapping Unity material names to MaterialInfo
+            materials_by_guid: Optional dict mapping Unity material GUIDs to MaterialInfo
         """
         self.unity_materials = unity_materials
         self.unity_names = list(unity_materials.keys())
         self.unity_names_lower = {name.lower(): name for name in self.unity_names}
+        self.materials_by_guid = materials_by_guid or {}
+
+    def match_by_guid(self, fbx_name: str, unity_guid: str) -> Optional[MaterialMatch]:
+        """
+        Match an FBX material to Unity material using exact GUID from .meta file.
+
+        This is the most reliable matching method as it uses Unity's own mappings.
+
+        Args:
+            fbx_name: Material name from FBX file
+            unity_guid: Unity material GUID from the FBX .meta file
+
+        Returns:
+            MaterialMatch with 100% confidence, or None if GUID not found
+        """
+        if unity_guid in self.materials_by_guid:
+            mat_info = self.materials_by_guid[unity_guid]
+            return MaterialMatch(
+                fbx_name=fbx_name,
+                unity_name=mat_info.name,
+                confidence=1.0,
+                match_reason="Exact GUID match from FBX .meta"
+            )
+        return None
+
+    def match_with_exact_mappings(
+        self,
+        fbx_names: list[str],
+        fbx_material_mappings: dict[str, str]
+    ) -> dict[str, MaterialMatch]:
+        """
+        Match FBX materials using exact GUID mappings from .meta files.
+
+        Args:
+            fbx_names: List of material names from the FBX file
+            fbx_material_mappings: Dict mapping FBX material name -> Unity material GUID
+
+        Returns:
+            Dict mapping FBX name to MaterialMatch
+        """
+        results = {}
+
+        for fbx_name in fbx_names:
+            # First try exact GUID match
+            if fbx_name in fbx_material_mappings:
+                unity_guid = fbx_material_mappings[fbx_name]
+                guid_match = self.match_by_guid(fbx_name, unity_guid)
+                if guid_match:
+                    results[fbx_name] = guid_match
+                    logger.debug(f"  {fbx_name} -> {guid_match.unity_name} (GUID match)")
+                    continue
+
+            # Fall back to fuzzy matching
+            results[fbx_name] = self.match(fbx_name)
+
+        return results
 
     def match(self, fbx_name: str) -> MaterialMatch:
         """

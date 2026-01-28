@@ -197,7 +197,12 @@ class SyntyConverter:
             logger.info(f"  {mat_type.name}: {len(names)} materials")
 
     def _match_materials(self):
-        """Match FBX material names to Unity material names."""
+        """Match FBX material names to Unity material names.
+
+        Uses a two-phase approach:
+        1. First, try exact GUID matching from FBX .meta files (most reliable)
+        2. Fall back to fuzzy name matching for any remaining materials
+        """
         # Get all unique FBX material names
         all_fbx_names = set()
         for materials in self.fbx_materials.values():
@@ -211,22 +216,68 @@ class SyntyConverter:
 
         logger.info(f"Matching {len(all_fbx_names)} FBX materials to {len(self.unity_materials)} Unity materials...")
 
-        matcher = MaterialMatcher(self.unity_materials)
-        matches = matcher.match_all(list(all_fbx_names))
+        # Create matcher with GUID lookup capability
+        materials_by_guid = {}
+        if self.unity_extractor:
+            materials_by_guid = self.unity_extractor.materials_by_guid
 
-        for fbx_name, match in matches.items():
+        matcher = MaterialMatcher(self.unity_materials, materials_by_guid)
+
+        # Track statistics
+        guid_matched = 0
+        fuzzy_matched = 0
+        unmatched = 0
+        all_matches = {}
+
+        # Phase 1: Try exact GUID matching per FBX file
+        fbx_material_mappings = {}
+        if self.unity_extractor:
+            fbx_material_mappings = self.unity_extractor.fbx_material_mappings
+
+        # Build a combined mapping of all FBX materials to their Unity GUIDs
+        combined_guid_mappings = {}
+        for fbx_name, mappings in fbx_material_mappings.items():
+            combined_guid_mappings.update(mappings)
+
+        if combined_guid_mappings:
+            logger.info(f"Found {len(combined_guid_mappings)} exact material mappings from FBX .meta files")
+
+        # Match each FBX material
+        for fbx_mat_name in all_fbx_names:
+            # First try exact GUID match
+            if fbx_mat_name in combined_guid_mappings:
+                unity_guid = combined_guid_mappings[fbx_mat_name]
+                guid_match = matcher.match_by_guid(fbx_mat_name, unity_guid)
+                if guid_match:
+                    self.material_matches[fbx_mat_name] = guid_match.unity_name
+                    all_matches[fbx_mat_name] = guid_match
+                    guid_matched += 1
+                    logger.debug(f"  {fbx_mat_name} -> {guid_match.unity_name} (GUID match)")
+                    continue
+
+            # Fall back to fuzzy matching
+            match = matcher.match(fbx_mat_name)
+            all_matches[fbx_mat_name] = match
+
             if match.unity_name:
-                self.material_matches[fbx_name] = match.unity_name
-                logger.debug(f"  {fbx_name} -> {match.unity_name} ({match.match_reason}, {match.confidence:.0%})")
+                self.material_matches[fbx_mat_name] = match.unity_name
+                fuzzy_matched += 1
+                logger.debug(f"  {fbx_mat_name} -> {match.unity_name} ({match.match_reason}, {match.confidence:.0%})")
             else:
-                self.material_matches[fbx_name] = None
-                logger.warning(f"  {fbx_name} -> NO MATCH")
+                self.material_matches[fbx_mat_name] = None
+                unmatched += 1
+                logger.warning(f"  {fbx_mat_name} -> NO MATCH")
 
-        summary = matcher.get_match_summary(matches)
-        logger.info(f"Matched {summary['matched']}/{summary['total']} materials ({summary['avg_confidence']:.0%} avg confidence)")
+        total = len(all_fbx_names)
+        matched = guid_matched + fuzzy_matched
+        logger.info(f"Material matching complete: {matched}/{total} matched")
+        logger.info(f"  - GUID exact matches: {guid_matched}")
+        logger.info(f"  - Fuzzy matches: {fuzzy_matched}")
+        logger.info(f"  - Unmatched: {unmatched}")
 
-        if summary['unmatched_names']:
-            logger.warning(f"Unmatched materials: {summary['unmatched_names']}")
+        if unmatched > 0:
+            unmatched_names = [name for name, match in all_matches.items() if not match.unity_name]
+            logger.warning(f"Unmatched materials: {unmatched_names}")
 
     def _generate_materials(self, use_fbx_names: bool = False):
         """Generate .tres material files."""
