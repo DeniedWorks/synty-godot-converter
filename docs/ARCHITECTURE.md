@@ -10,28 +10,49 @@ The converter follows a pipeline architecture with distinct modules for each sta
 Unity Package (.unitypackage)
          |
          v
-    +---------------+
-    |   Extractors  |  <- Parse .mat YAML, extract FBX info
-    +---------------+
+    +-------------------+
+    |    Extractors     |  <- Parse .mat YAML, FBX .meta files, extract assets
+    +-------------------+
          |
          v
-    +---------------+
-    |  Classifiers  |  <- Detect material types (FOLIAGE, GLASS, etc.)
-    +---------------+
+    +-------------------+
+    |  FBX Analysis     |  <- Optional Blender headless FBX material extraction
+    +-------------------+
          |
          v
-    +---------------+
-    |   Generators  |  <- Create .tres materials, .fbx.import files
-    +---------------+
+    +-------------------+
+    |    Matchers       |  <- GUID matching + fuzzy name matching
+    +-------------------+
          |
          v
-    +---------------+
-    |    Copiers    |  <- Copy textures with fuzzy matching
-    +---------------+
+    +-------------------+
+    |   Classifiers     |  <- Detect material types (FOLIAGE, GLASS, etc.)
+    +-------------------+
+         |
+         v
+    +-------------------+
+    |   Generators      |  <- Create .tres materials, .fbx.import files
+    +-------------------+
+         |
+         v
+    +-------------------+
+    |     Copiers       |  <- Copy textures with fuzzy matching
+    +-------------------+
          |
          v
     Godot Project Assets
 ```
+
+### Detailed Conversion Flow
+
+1. **Extract Unity Package** - Parse `.unitypackage` archive, extract all assets
+2. **Parse FBX Meta Files** - Extract GUID-based material mappings from FBX `.meta` files
+3. **Analyze FBX with Blender** (optional) - Extract actual material names from FBX files
+4. **Match Materials** - Phase 1: GUID matching (100% accurate), Phase 2: Fuzzy name matching
+5. **Classify Materials** - Determine shader type for each material
+6. **Generate Materials** - Create Godot `.tres` ShaderMaterial files with FBX material names
+7. **Configure Imports** - Generate `.fbx.import` files with proper FBX/ufbx parameters
+8. **Copy Assets** - Copy textures and FBX files to Godot project
 
 ## Directory Structure
 
@@ -42,10 +63,16 @@ synty_converter_v2/
 |-- main.py               # CLI argument parsing and orchestration
 |-- config.py             # Configuration classes and constants
 |-- converter.py          # Main SyntyConverter orchestrator class
+|-- gui.py                # CustomTkinter GUI application
 |
 |-- extractors/
 |   |-- __init__.py
-|   |-- unity_package.py  # Parse .unitypackage and .mat YAML files
+|   |-- unity_package.py  # Parse .unitypackage, .mat YAML, FBX .meta files
+|   |-- fbx_extractor.py  # Blender-based FBX material extraction
+|
+|-- matchers/
+|   |-- __init__.py
+|   |-- material_matcher.py  # Two-phase material matching (GUID + fuzzy)
 |
 |-- classifiers/
 |   |-- __init__.py
@@ -72,18 +99,21 @@ synty_converter_v2/
 |   |-- sky_dome.gdshader
 |   |-- particles_unlit.gdshader
 |   |-- biomes_tree.gdshader
+
+build_exe.py              # PyInstaller build script for standalone exe
 ```
 
 ## Module Details
 
 ### extractors/unity_package.py
 
-**Purpose:** Parse Unity .unitypackage files and extract material metadata from .mat YAML files.
+**Purpose:** Parse Unity .unitypackage files, extract material metadata from .mat YAML files, and parse FBX .meta files for GUID-based material mappings.
 
 **Key Classes:**
 - `UnityPackageExtractor` - Main extractor class
 - `MaterialInfo` - Dataclass holding parsed material properties
 - `TextureInfo` - Dataclass holding texture asset information
+- `FBXMaterialMapping` - Dataclass for FBX material name to Unity material GUID mappings
 
 **Key Features:**
 - Extracts gzipped tar archive (.unitypackage format)
@@ -93,17 +123,99 @@ synty_converter_v2/
   - `m_Floats` - Float properties like `_Enable_Emission`
   - `m_Colors` - Color properties like `_Emission_Color`
   - `stringTagMap` - Tags like `RenderType`
+- **Parses FBX .meta files** for `externalObjects` section:
+  - Maps FBX material names to Unity material GUIDs
+  - Enables 100% accurate material matching
 - Resolves texture GUIDs to actual filenames
-- Provides fuzzy material name matching
+- Provides `materials_by_guid` dict for GUID-based lookups
+- Provides `fbx_material_mappings` dict for FBX-to-Unity material mappings
 
 **Example Usage:**
 ```python
 extractor = UnityPackageExtractor(Path("pack.unitypackage"))
 extractor.extract()
 
+# Access materials by name
 for name, mat_info in extractor.materials.items():
     print(f"{name}: {mat_info.has_foliage_properties}")
+
+# Access materials by GUID (for FBX matching)
+for guid, mat_info in extractor.materials_by_guid.items():
+    print(f"GUID {guid}: {mat_info.name}")
+
+# Access FBX material mappings
+for fbx_path, mappings in extractor.fbx_material_mappings.items():
+    for mapping in mappings:
+        print(f"{fbx_path}: {mapping.fbx_material_name} -> {mapping.unity_material_guid}")
 ```
+
+### extractors/fbx_extractor.py
+
+**Purpose:** Extract material names from FBX files using Blender's headless mode.
+
+**Key Features:**
+- Runs Blender in background mode (no GUI)
+- Extracts actual material names from FBX mesh objects
+- Handles Blender's automatic `.001`, `.002` suffix additions
+- Provides `clean_material_name()` function to strip suffixes
+- Returns deduplicated list of material names per FBX file
+- Gracefully falls back if Blender is not available
+
+**Example Usage:**
+```python
+from synty_converter_v2.extractors.fbx_extractor import FBXExtractor
+
+extractor = FBXExtractor()
+if extractor.blender_available:
+    materials = extractor.extract_materials(Path("model.fbx"))
+    # Returns: ["Material_01", "Material_02", ...]
+```
+
+### matchers/material_matcher.py
+
+**Purpose:** Two-phase material matching system that maps FBX material names to Unity materials.
+
+**Key Classes:**
+- `MaterialMatcher` - Main matcher class with GUID and fuzzy matching
+
+**Matching Phases:**
+
+1. **Phase 1: GUID Matching (100% confidence)**
+   - Uses `FBXMaterialMapping` data from FBX `.meta` files
+   - Looks up Unity material by GUID using `materials_by_guid`
+   - Returns exact match when FBX material name exists in `.meta` file
+
+2. **Phase 2: Fuzzy Name Matching (fallback)**
+   - Cleans Blender suffixes (`.001`, `.002`) from material names
+   - Tries exact name match first
+   - Falls back to normalized name comparison
+   - Uses similarity scoring for best match
+
+**Key Features:**
+- Detailed logging of match statistics (GUID vs fuzzy matches)
+- Handles materials not found in either phase
+- Cleans Blender-added duplicate suffixes
+
+**Example Usage:**
+```python
+from synty_converter_v2.matchers import MaterialMatcher
+
+matcher = MaterialMatcher(
+    materials=extractor.materials,
+    materials_by_guid=extractor.materials_by_guid,
+    fbx_material_mappings=extractor.fbx_material_mappings
+)
+
+# Match a single FBX material
+unity_material = matcher.match(fbx_path, fbx_material_name)
+
+# Match all materials for an FBX file
+matches = matcher.match_all(fbx_path, fbx_material_names)
+```
+
+See [FBX_MATERIAL_MATCHING.md](FBX_MATERIAL_MATCHING.md) for detailed documentation.
+
+---
 
 ### classifiers/material_classifier.py
 
@@ -268,21 +380,60 @@ class SyntyConverter:
 
         # Step 2: Extract Unity package if provided
         self._extract_unity_package()
+        # - Also parses FBX .meta files for GUID mappings
+        # - Populates materials_by_guid and fbx_material_mappings
 
-        # Step 3: Copy textures
+        # Step 3: Analyze FBX files with Blender (optional)
+        self._analyze_fbx_materials()
+        # - Extracts actual material names from FBX files
+        # - Cleans Blender .001/.002 suffixes
+
+        # Step 4: Match FBX materials to Unity materials
+        self._match_materials()
+        # - Phase 1: GUID matching from .meta files
+        # - Phase 2: Fuzzy name matching fallback
+
+        # Step 5: Copy textures
         self._copy_textures()
 
-        # Step 4: Collect and classify materials
+        # Step 6: Collect and classify materials
         self._classify_materials()
 
-        # Step 5: Generate material files
+        # Step 7: Generate material files
         self._generate_materials()
+        # - Uses matched FBX material names for accurate assignments
 
-        # Step 6: Copy FBX files and generate import configs
+        # Step 8: Copy FBX files and generate import configs
         self._process_models()
+        # - Generates .fbx.import with FBX/ufbx parameters
 
-        # Step 7: Install shaders if needed
+        # Step 9: Install shaders if needed
         self._ensure_shaders()
+```
+
+### gui.py - GUI Application
+
+Modern graphical interface built with CustomTkinter:
+
+**Features:**
+- Dark theme with modern styling
+- File browser for `.unitypackage` selection
+- Folder browser for Godot project selection
+- Pack name auto-detection from filename
+- Dry Run toggle for preview mode
+- Extract Meshes toggle
+- Real-time output log with scrolling
+- Progress indication during conversion
+
+**Building Standalone Executable:**
+```bash
+# Install dev dependencies
+pip install -e ".[dev]"
+
+# Build exe using PyInstaller
+python build_exe.py
+
+# Output: dist/SyntyConverter.exe
 ```
 
 ## Configuration
@@ -386,5 +537,19 @@ python -m synty_converter_v2 \
 
 ## Dependencies
 
+### Required
 - Python 3.10+
-- Standard library only (no external packages required)
+- customtkinter >= 5.2.0 (for GUI)
+
+### Optional
+- **Blender** - For FBX material extraction (any recent version)
+  - Must be in system PATH
+  - Used in headless mode (no GUI required)
+  - Falls back gracefully if not available
+
+### Development
+- pytest >= 7.0
+- pytest-cov >= 4.0
+- black >= 23.0
+- ruff >= 0.1.0
+- pyinstaller >= 6.0 (for building standalone exe)

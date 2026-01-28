@@ -687,6 +687,28 @@ void fragment() {
 }
 ```
 
+## FBX Import Configuration
+
+The converter generates `.fbx.import` files with proper parameters for Godot's FBX/ufbx importer:
+
+```ini
+[params]
+# Force native ufbx importer (not Blender)
+fbx/importer=0
+
+# Material remapping to generated .tres files
+_subresources={
+"materials": {
+"Mat_Building_Stone": {"use_external/enabled": true, "use_external/path": "res://assets/synty/MyPack/Materials/Mat_Building_Stone.tres"}
+}
+}
+```
+
+**Key Import Parameters:**
+- `fbx/importer=0` - Uses Godot's native ufbx importer instead of Blender
+- Material subresources point to generated `.tres` ShaderMaterial files
+- Mesh extraction settings for reusable `.res` mesh files
+
 ## License
 
 All shaders are copyright Giancarlo Niccolai and published under the MIT License.
