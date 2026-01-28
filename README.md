@@ -92,6 +92,43 @@ python -m synty_converter_v2 \
 
 ---
 
+## GUI Usage
+
+The converter includes a modern graphical user interface with a dark theme.
+
+### Running the GUI
+
+```bash
+# Using the installed command
+synty-convert-gui
+
+# Or run directly with Python
+python -m synty_converter_v2.gui
+```
+
+The GUI provides:
+- File browser for selecting Unity packages (.unitypackage)
+- Folder browser for selecting Godot project directory
+- Dry Run option to preview changes without writing files
+- Extract Meshes toggle for mesh extraction configuration
+- Real-time output log showing conversion progress
+
+### Building Standalone Executable
+
+To create a standalone `.exe` file that can run without Python installed:
+
+```bash
+# Install dev dependencies (includes PyInstaller)
+pip install -e ".[dev]"
+
+# Run the build script
+python build_exe.py
+```
+
+This creates `dist/SyntyConverter.exe` - a single portable executable with no external dependencies.
+
+---
+
 ## Output Directory Structure
 
 ```

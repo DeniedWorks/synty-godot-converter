@@ -25,16 +25,22 @@ classifiers = [
     "Topic :: Multimedia :: Graphics :: 3D Modeling",
 ]
 
+dependencies = [
+    "customtkinter>=5.2.0",
+]
+
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "black>=23.0",
     "ruff>=0.1.0",
+    "pyinstaller>=6.0",
 ]
 
 [project.scripts]
 synty-convert = "synty_converter_v2.main:main"
+synty-convert-gui = "synty_converter_v2.gui:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
