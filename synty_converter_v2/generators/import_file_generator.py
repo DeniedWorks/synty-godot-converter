@@ -109,7 +109,7 @@ class ImportFileGenerator:
             "",
         ]
 
-        # Standard import parameters
+        # FBX import parameters for Godot 4.x (uses ufbx internally)
         params = {
             "nodes/root_type": "",
             "nodes/root_name": "",
@@ -127,8 +127,9 @@ class ImportFileGenerator:
             "animation/trimming": False,
             "animation/remove_immutable_tracks": True,
             "import_script/path": "",
-            "gltf/naming_version": 1,
-            "gltf/embedded_image_handling": 1,
+            "fbx/importer": 0,  # 0 = ufbx (native), 1 = FBX2glTF
+            "fbx/allow_geometry_helper_nodes": False,
+            "fbx/embedded_image_handling": 1,
         }
 
         for key, value in params.items():

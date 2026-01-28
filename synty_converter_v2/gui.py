@@ -9,8 +9,13 @@ import sys
 import re
 from typing import Optional
 
-from .converter import SyntyConverter
-from .config import ConversionConfig
+# Handle imports for both module and standalone exe contexts
+try:
+    from .converter import SyntyConverter
+    from .config import ConversionConfig
+except ImportError:
+    from synty_converter_v2.converter import SyntyConverter
+    from synty_converter_v2.config import ConversionConfig
 
 
 class TextHandler(logging.Handler):
