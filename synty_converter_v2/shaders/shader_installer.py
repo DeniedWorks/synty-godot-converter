@@ -2,7 +2,6 @@
 
 import re
 import urllib.request
-import urllib.error
 from pathlib import Path
 from typing import Optional
 import logging

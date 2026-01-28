@@ -46,7 +46,6 @@ synty_converter_v2/
 |-- extractors/
 |   |-- __init__.py
 |   |-- unity_package.py  # Parse .unitypackage and .mat YAML files
-|   |-- fbx_extractor.py  # Extract mesh/material info from FBX via Blender
 |
 |-- classifiers/
 |   |-- __init__.py
@@ -105,28 +104,6 @@ extractor.extract()
 for name, mat_info in extractor.materials.items():
     print(f"{name}: {mat_info.has_foliage_properties}")
 ```
-
-### extractors/fbx_extractor.py
-
-**Purpose:** Analyze FBX files to extract mesh and material information using Blender headless mode.
-
-**Key Classes:**
-- `FBXExtractor` - Main FBX analyzer
-- `FBXInfo` - Dataclass with FBX metadata
-- `MeshInfo` - Dataclass with mesh details
-
-**Key Features:**
-- Runs Blender in `--background` mode with a Python script
-- Extracts mesh names, vertex counts, face counts
-- Identifies material slot assignments
-- Detects embedded textures
-- Falls back to filename-based heuristics if Blender unavailable
-
-**Blender Detection:**
-Automatically searches common installation paths:
-- Windows: `C:\Program Files\Blender Foundation\Blender X.X\blender.exe`
-- Linux: `/usr/bin/blender`, `/usr/local/bin/blender`
-- macOS: `/Applications/Blender.app/Contents/MacOS/Blender`
 
 ### classifiers/material_classifier.py
 
@@ -411,4 +388,3 @@ python -m synty_converter_v2 \
 
 - Python 3.10+
 - Standard library only (no external packages required)
-- Optional: Blender for FBX analysis (falls back to heuristics)

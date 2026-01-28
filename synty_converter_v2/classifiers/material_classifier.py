@@ -136,30 +136,6 @@ class MaterialClassifier:
                 return True
         return False
 
-    def classify_batch(
-        self,
-        material_names: list[str],
-        materials_info: Optional[dict[str, MaterialInfo]] = None
-    ) -> dict[str, MaterialType]:
-        """
-        Classify multiple materials.
-
-        Args:
-            material_names: List of material names
-            materials_info: Optional dict mapping names to MaterialInfo
-
-        Returns:
-            Dict mapping material names to MaterialType
-        """
-        results = {}
-        materials_info = materials_info or {}
-
-        for name in material_names:
-            mat_info = materials_info.get(name)
-            results[name] = self.classify(name, mat_info)
-
-        return results
-
     def get_summary(self, classifications: dict[str, MaterialType]) -> dict[MaterialType, list[str]]:
         """Get summary of classifications grouped by type."""
         summary: dict[MaterialType, list[str]] = {t: [] for t in MaterialType}

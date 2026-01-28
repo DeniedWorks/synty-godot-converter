@@ -6,7 +6,7 @@ from typing import Optional
 import logging
 
 from .config import ConversionConfig, MaterialType, SHADER_FILES
-from .extractors import UnityPackageExtractor, FBXExtractor
+from .extractors import UnityPackageExtractor
 from .classifiers import MaterialClassifier
 from .generators import MaterialGenerator, ImportFileGenerator
 from .copiers import TextureCopier

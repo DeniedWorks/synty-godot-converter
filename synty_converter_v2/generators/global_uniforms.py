@@ -1,10 +1,4 @@
-"""Generate Godot script for setting up global shader uniforms."""
-
-from pathlib import Path
-import logging
-
-logger = logging.getLogger(__name__)
-
+"""Global shader uniforms script template for Synty shaders."""
 
 GLOBAL_UNIFORMS_SCRIPT = '''extends Node
 ## Global shader uniforms for Synty shaders.
@@ -62,46 +56,3 @@ func set_wind_from_angle(angle_degrees: float, strength: float = 1.0) -> void:
 \twind_direction = Vector3(sin(angle_rad), 0.0, cos(angle_rad)).normalized()
 \twind_intensity = strength
 '''
-
-
-def generate_global_uniforms_script(output_path: Path, dry_run: bool = False) -> Path:
-    """
-    Generate the global shader uniforms script.
-
-    Args:
-        output_path: Path to write the script
-        dry_run: If True, don't write the file
-
-    Returns:
-        Path where the script was/would be written
-    """
-    output_path = Path(output_path)
-
-    if not dry_run:
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(GLOBAL_UNIFORMS_SCRIPT, encoding='utf-8')
-        logger.info(f"Generated global uniforms script: {output_path}")
-    else:
-        logger.info(f"[DRY RUN] Would generate: {output_path}")
-
-    return output_path
-
-
-def print_autoload_instructions(script_path: Path):
-    """Print instructions for setting up the autoload."""
-    print("\n" + "=" * 60)
-    print("Global Shader Uniforms Setup")
-    print("=" * 60)
-    print(f"\nScript generated at: {script_path}")
-    print("\nTo enable global shader uniforms:")
-    print("1. Open Project -> Project Settings -> Autoload")
-    print(f"2. Add the script: {script_path}")
-    print("3. Name it: GlobalShaderUniforms")
-    print("4. Enable it")
-    print("\nThe script provides:")
-    print("  - WindDirection (Vector3)")
-    print("  - WindIntensity (float)")
-    print("  - GaleStrength (float)")
-    print("  - OceanWavesGradient (GradientTexture1D)")
-    print("\nUse GlobalShaderUniforms.trigger_gust() to simulate wind gusts")
-    print("=" * 60)

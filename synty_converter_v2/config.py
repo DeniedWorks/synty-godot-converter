@@ -35,7 +35,6 @@ class ConversionConfig:
     dry_run: bool = False
     verbose: bool = False
     extract_meshes: bool = True
-    generate_prefabs: bool = False
 
     @property
     def output_base(self) -> Path:
@@ -57,10 +56,6 @@ class ConversionConfig:
     @property
     def meshes_dir(self) -> Path:
         return self.output_base / "Meshes"
-
-    @property
-    def prefabs_dir(self) -> Path:
-        return self.output_base / "Prefabs"
 
     @property
     def shaders_dir(self) -> Path:
