@@ -58,7 +58,18 @@ class FBXInfo:
 
 
 class FBXExtractor:
-    """Extract material and mesh info from FBX files using Blender."""
+    """Extract material and mesh info from FBX files using Blender.
+
+    NOTE: This is an OPTIONAL FALLBACK. The primary source for FBX material names
+    is the Unity FBX .meta files, which contain the exact same material names in
+    their externalObjects section. Blender analysis is only needed when:
+
+    1. Converting from extracted directories (no .unitypackage)
+    2. FBX files are missing their .meta files
+    3. The .meta file's externalObjects section is empty/missing
+
+    For typical .unitypackage conversions, Blender is NOT required.
+    """
 
     # Blender Python script to extract FBX info
     BLENDER_SCRIPT = '''

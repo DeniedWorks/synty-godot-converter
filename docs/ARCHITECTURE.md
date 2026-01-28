@@ -11,17 +11,17 @@ Unity Package (.unitypackage)
          |
          v
     +-------------------+
-    |    Extractors     |  <- Parse .mat YAML, FBX .meta files, extract assets
-    +-------------------+
+    |    Extractors     |  <- Parse .mat YAML, FBX .meta files (PRIMARY source
+    +-------------------+     for FBX material names), extract assets
          |
          v
     +-------------------+
-    |  FBX Analysis     |  <- Optional Blender headless FBX material extraction
-    +-------------------+
+    |  FBX Analysis     |  <- OPTIONAL Blender fallback (only when .meta
+    +-------------------+     files unavailable)
          |
          v
     +-------------------+
-    |    Matchers       |  <- GUID matching + fuzzy name matching
+    |    Matchers       |  <- GUID matching from .meta + fuzzy name fallback
     +-------------------+
          |
          v
@@ -46,9 +46,9 @@ Unity Package (.unitypackage)
 ### Detailed Conversion Flow
 
 1. **Extract Unity Package** - Parse `.unitypackage` archive, extract all assets
-2. **Parse FBX Meta Files** - Extract GUID-based material mappings from FBX `.meta` files
-3. **Analyze FBX with Blender** (optional) - Extract actual material names from FBX files
-4. **Match Materials** - Phase 1: GUID matching (100% accurate), Phase 2: Fuzzy name matching
+2. **Parse FBX Meta Files (PRIMARY)** - Extract FBX material names AND Unity material GUIDs from `externalObjects` section in FBX `.meta` files. This is the primary source for FBX material names - no Blender needed.
+3. **Analyze FBX with Blender (OPTIONAL FALLBACK)** - Only used when `.meta` files are unavailable (e.g., converting from extracted directories)
+4. **Match Materials** - Primary: GUID matching from `.meta` files (100% accurate), Fallback: Fuzzy name matching
 5. **Classify Materials** - Determine shader type for each material
 6. **Generate Materials** - Create Godot `.tres` ShaderMaterial files with FBX material names
 7. **Configure Imports** - Generate `.fbx.import` files with proper FBX/ufbx parameters
@@ -151,7 +151,12 @@ for fbx_path, mappings in extractor.fbx_material_mappings.items():
 
 ### extractors/fbx_extractor.py
 
-**Purpose:** Extract material names from FBX files using Blender's headless mode.
+**Purpose:** Extract material names from FBX files using Blender's headless mode. **This is an optional fallback** - the primary source for FBX material names is the `.meta` file parser in `unity_package.py`.
+
+**When Used:**
+- Converting from extracted directories without `.meta` files
+- FBX files that lack corresponding `.meta` files
+- NOT needed for typical `.unitypackage` conversions (`.meta` files provide all needed data)
 
 **Key Features:**
 - Runs Blender in background mode (no GUI)
@@ -180,15 +185,17 @@ if extractor.blender_available:
 
 **Matching Phases:**
 
-1. **Phase 1: GUID Matching (100% confidence)**
+1. **Primary: Meta File GUID Matching (100% confidence, no Blender needed)**
    - Uses `FBXMaterialMapping` data from FBX `.meta` files
+   - The `.meta` file contains both FBX material names AND Unity material GUIDs
    - Looks up Unity material by GUID using `materials_by_guid`
-   - Returns exact match when FBX material name exists in `.meta` file
+   - Returns exact match - this is the primary and preferred method
 
-2. **Phase 2: Fuzzy Name Matching (fallback)**
+2. **Fallback: Blender + Fuzzy Name Matching**
+   - Only used when `.meta` files are unavailable
+   - If Blender available: extracts FBX material names from file
    - Cleans Blender suffixes (`.001`, `.002`) from material names
-   - Tries exact name match first
-   - Falls back to normalized name comparison
+   - Tries exact name match, then normalized comparison
    - Uses similarity scoring for best match
 
 **Key Features:**
@@ -542,8 +549,10 @@ python -m synty_converter_v2 \
 - customtkinter >= 5.2.0 (for GUI)
 
 ### Optional
-- **Blender** - For FBX material extraction (any recent version)
-  - Must be in system PATH
+- **Blender** - Fallback for FBX material extraction (any recent version)
+  - **Not needed for `.unitypackage` conversions** - `.meta` files provide FBX material names
+  - Only useful when converting from extracted directories without `.meta` files
+  - Must be in system PATH if used
   - Used in headless mode (no GUI required)
   - Falls back gracefully if not available
 

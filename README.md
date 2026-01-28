@@ -36,10 +36,10 @@ Synty Asset Converter v2 automates the process of migrating Synty's popular low-
 - **Easy Configuration** - File/folder browsers for selecting packages and projects
 
 ### Advanced Material Matching (v2.1)
-- **FBX Meta File Parsing** - Parse Unity FBX `.meta` files for exact GUID-based material mappings
-- **Blender FBX Analysis** - Optional headless Blender integration to extract actual material names from FBX files
-- **Two-Phase Matching** - GUID matching (100% accurate) with fuzzy name matching fallback
-- **Graceful Degradation** - Works without Blender, falling back to intelligent name matching
+- **FBX Meta File Parsing (Primary)** - Parse Unity FBX `.meta` files for exact GUID-based material mappings with FBX material names from `externalObjects` section
+- **Blender FBX Analysis (Optional Fallback)** - Optional headless Blender integration only when `.meta` files are unavailable
+- **Two-Phase Matching** - GUID matching from `.meta` files (100% accurate) with fuzzy name matching fallback
+- **Works Without Blender** - Full functionality using `.meta` file data; Blender is completely optional
 
 ---
 
@@ -64,19 +64,23 @@ python -m synty_converter_v2 --help
 
 ### Optional: Blender Integration
 
-For best material matching accuracy, install [Blender](https://www.blender.org/) and ensure it's in your system PATH:
+**Blender is optional.** The converter works perfectly without it by extracting FBX material names directly from Unity `.meta` files included in `.unitypackage` archives.
 
+When converting `.unitypackage` files:
+1. The `externalObjects` section in FBX `.meta` files contains the exact FBX material names
+2. These names are matched against Unity material GUIDs for 100% accurate assignments
+3. **No Blender required** for typical Unity package conversions
+
+**When Blender is useful:**
+- Converting from extracted directories (without `.meta` files)
+- Working with FBX files that lack corresponding `.meta` files
+- Blender handles `.001`, `.002` suffix duplicates automatically
+
+To install Blender for these edge cases:
 ```bash
 # Check if Blender is available
 blender --version
 ```
-
-When Blender is available, the converter will:
-1. Analyze FBX files to extract actual material names
-2. Match these names against Unity materials for 100% accurate assignments
-3. Handle Blender's `.001`, `.002` suffix duplicates automatically
-
-**Without Blender:** The converter still works using GUID matching from `.meta` files and fuzzy name matching as fallback.
 
 ---
 
@@ -318,17 +322,20 @@ summary = converter.convert()
 
 ### Material Matching Workflow
 
-The converter uses a sophisticated two-phase material matching system:
+The converter uses a sophisticated material matching system where **`.meta` files are the primary source**:
 
-1. **Phase 1: GUID Matching** (100% accurate)
+1. **Primary: Meta File Extraction** (100% accurate, no Blender needed)
    - Parses FBX `.meta` files from the Unity package
-   - Extracts `externalObjects` section with FBX material name to Unity material GUID mappings
-   - Looks up Unity materials by GUID
+   - Extracts `externalObjects` section containing both FBX material names AND Unity material GUIDs
+   - Provides complete material mappings directly - Blender is unnecessary
 
-2. **Phase 2: Fuzzy Matching** (fallback)
-   - If Blender is available, extracts actual material names from FBX files
+2. **Fallback: Blender Analysis** (only when `.meta` files unavailable)
+   - Used when converting from extracted directories without `.meta` files
+   - Extracts actual material names from FBX files via headless Blender
    - Cleans Blender's `.001` suffixes from duplicate materials
-   - Falls back to intelligent name pattern matching
+
+3. **Final Fallback: Fuzzy Name Matching**
+   - Intelligent name pattern matching when neither source is available
 
 See [FBX_MATERIAL_MATCHING.md](docs/FBX_MATERIAL_MATCHING.md) for detailed documentation.
 

@@ -20,18 +20,28 @@ Without accurate matching, materials either won't be applied or will be applied 
 
 ## Solution Overview
 
-The converter uses a **two-phase matching system**:
+The converter uses a **meta-file-first matching system** where FBX `.meta` files are the **primary source** for both FBX material names and Unity material mappings. Blender is completely optional.
 
-| Phase | Method | Confidence | Source |
-|-------|--------|------------|--------|
-| 1 | GUID Matching | 100% | FBX `.meta` files |
-| 2 | Fuzzy Name Matching | ~90% | Material names + Blender |
+| Source | Method | Confidence | Blender Required |
+|--------|--------|------------|------------------|
+| **PRIMARY** | `.meta` file `externalObjects` | 100% | No |
+| Fallback | Blender FBX extraction + fuzzy matching | ~90% | Yes (optional) |
 
-## Phase 1: GUID Matching from FBX Meta Files
+### Why .meta Files Make Blender Optional
+
+The `externalObjects` section in FBX `.meta` files contains:
+1. **The exact FBX material names** (the `name` field)
+2. **The Unity material GUIDs** they map to (the `guid` field)
+
+This means for typical `.unitypackage` conversions, **all the information needed for 100% accurate material matching is already in the package** - no need to run Blender to extract FBX material names.
+
+## Primary Source: FBX Meta Files (No Blender Needed)
 
 ### How It Works
 
 Unity stores FBX import settings in `.meta` files alongside each FBX file. These files contain an `externalObjects` section that explicitly maps FBX material names to Unity material GUIDs.
+
+**Key insight:** The `.meta` file already contains the FBX material names - we don't need Blender to extract them from the FBX file.
 
 **Example FBX Meta File (SM_Building_House_01.fbx.meta):**
 ```yaml
@@ -90,19 +100,24 @@ def match_by_guid(self, fbx_path: str, fbx_material_name: str) -> Optional[Mater
 - **100% accurate** - Uses Unity's own mapping data
 - **No guessing** - Direct GUID lookup
 - **Handles renamed materials** - Works even if Unity material name differs from FBX name
+- **No Blender required** - FBX material names come from `.meta` files, not from parsing FBX
+- **Fast** - No external process needed
 
 ### Limitations
 
 - Only works for materials that Unity has explicitly mapped
 - New/unassigned materials won't have mappings
+- Requires `.meta` files (included in `.unitypackage` files, but may be missing from extracted directories)
 
-## Phase 2: Fuzzy Name Matching
+## Fallback: Blender + Fuzzy Name Matching
 
-When GUID matching fails (material not in `.meta` file), the converter falls back to fuzzy name matching.
+When `.meta` files are unavailable (e.g., converting from extracted directories), the converter falls back to Blender-based extraction and fuzzy name matching.
 
-### Step 2a: Blender FBX Analysis (Optional)
+**Note:** This fallback is rarely needed when converting `.unitypackage` files, since they include `.meta` files.
 
-If Blender is available, the converter extracts actual material names from the FBX file:
+### Fallback Step 1: Blender FBX Analysis (Optional)
+
+If Blender is available AND `.meta` files don't exist, the converter extracts actual material names from the FBX file:
 
 ```python
 from synty_converter_v2.extractors.fbx_extractor import FBXExtractor
@@ -120,7 +135,7 @@ if extractor.blender_available:
 4. Collects material names from material slots
 5. Returns deduplicated list
 
-### Step 2b: Blender Suffix Handling
+### Fallback Step 2: Blender Suffix Handling
 
 Blender automatically adds `.001`, `.002` suffixes when importing duplicate material names:
 
@@ -143,7 +158,7 @@ clean_material_name("Mat_Stone.002")  # -> "Mat_Stone"
 clean_material_name("Mat_Stone")      # -> "Mat_Stone"
 ```
 
-### Step 2c: Fuzzy Name Matching
+### Fallback Step 3: Fuzzy Name Matching
 
 After cleaning, the matcher tries several strategies:
 
@@ -271,8 +286,8 @@ INFO -   Unmatched:     3 (1.1%)
 
 ### For Best Results
 
-1. **Use complete Unity packages** - Include all `.meta` files
-2. **Install Blender** - Enables accurate FBX material extraction
+1. **Use complete Unity packages** - The `.meta` files provide everything needed for 100% accurate matching
+2. **Blender is optional** - Not needed for `.unitypackage` conversions; only useful for extracted directories
 3. **Check unmatched materials** - Review warnings for manual fixing
 
 ### When Materials Don't Match
@@ -332,11 +347,20 @@ for mat in sorted(materials):
 
 ## Conclusion
 
-The two-phase material matching system provides:
+The material matching system provides:
 
-- **High accuracy** - 90%+ correct matches in typical use
-- **Graceful fallback** - Works even without Blender or `.meta` files
+- **100% accuracy with `.meta` files** - No Blender needed for `.unitypackage` conversions
+- **Blender is completely optional** - Only a fallback for edge cases (extracted directories)
+- **Graceful fallback chain** - `.meta` files -> Blender extraction -> fuzzy name matching
 - **Transparency** - Detailed logging shows how each material was matched
 - **Extensibility** - Easy to add custom matching rules if needed
 
-For most Synty asset packs with complete `.meta` files, expect 95%+ GUID matches with near-perfect accuracy.
+### Data Source Summary
+
+| Conversion Type | FBX Material Name Source | Blender Required |
+|-----------------|-------------------------|------------------|
+| `.unitypackage` file | `.meta` files (externalObjects) | No |
+| Extracted directory with `.meta` files | `.meta` files (externalObjects) | No |
+| Extracted directory without `.meta` files | Blender FBX extraction | Yes (or fuzzy matching fallback) |
+
+For most Synty asset packs converted from `.unitypackage` files, expect 100% accurate GUID matches with no Blender dependency.

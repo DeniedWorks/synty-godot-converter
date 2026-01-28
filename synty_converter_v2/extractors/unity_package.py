@@ -360,6 +360,30 @@ class UnityPackageExtractor:
         """
         return self.fbx_material_mappings.get(fbx_name)
 
+    def get_all_fbx_material_names(self) -> set[str]:
+        """Get all unique FBX material names from .meta file mappings.
+
+        This is the primary source of FBX material names - no Blender needed!
+        The externalObjects section in FBX .meta files contains the exact
+        material names as they appear in the FBX file.
+
+        Returns:
+            Set of all FBX material names found in externalObjects sections.
+        """
+        all_names = set()
+        for mappings in self.fbx_material_mappings.values():
+            all_names.update(mappings.keys())
+        return all_names
+
+    def get_fbx_materials_dict(self) -> dict[str, list[str]]:
+        """Get FBX material names organized by FBX file.
+
+        Returns:
+            Dict mapping FBX filename (without extension) to list of material names.
+        """
+        return {fbx: list(mappings.keys())
+                for fbx, mappings in self.fbx_material_mappings.items()}
+
     def _resolve_texture_guids(self):
         """Resolve texture GUIDs in materials to actual filenames."""
         for mat_info in self.materials.values():

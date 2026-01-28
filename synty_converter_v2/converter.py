@@ -45,7 +45,8 @@ class SyntyConverter:
             "textures": 0,
             "models": 0,
             "meshes": 0,
-            "blender_available": False,
+            "material_source": "unknown",  # "meta_files", "blender", or "unity_names_only"
+            "blender_available": False,  # Kept for backward compatibility
             "errors": []
         }
 
@@ -61,35 +62,45 @@ class SyntyConverter:
             self._copy_textures()
             summary["textures"] = len(self.texture_copier.copied_textures)
 
-            # Step 4: Check if Blender is available for FBX analysis
-            blender_available = self.fbx_extractor.is_available()
-            summary["blender_available"] = blender_available
+            # Step 4: Get FBX material names from .meta files (PRIMARY source)
+            meta_fbx_materials = self._get_fbx_materials_from_meta()
+            has_meta_mappings = bool(meta_fbx_materials)
 
-            if blender_available:
-                logger.info("Blender found - will analyze FBX files for accurate material names")
+            if has_meta_mappings:
+                # Use .meta file data - no Blender needed!
+                logger.info(f"Found {len(meta_fbx_materials)} FBX files with material mappings from .meta files")
+                self.fbx_materials = meta_fbx_materials
+                summary["material_source"] = "meta_files"
             else:
-                logger.warning("Blender not found - using Unity material names (may cause mismatches)")
+                # Step 5: Fallback to Blender if .meta files unavailable
+                blender_available = self.fbx_extractor.is_available()
+                summary["blender_available"] = blender_available
 
-            # Step 5: Analyze FBX files to get actual material names
-            if blender_available:
-                self._analyze_fbx_files()
+                if blender_available:
+                    logger.info("No .meta mappings found - using Blender for FBX analysis (fallback)")
+                    self._analyze_fbx_files()
+                    summary["material_source"] = "blender"
+                else:
+                    logger.warning("No .meta mappings and Blender not available - using Unity material names")
+                    summary["material_source"] = "unity_names_only"
 
             # Step 6: Classify Unity materials by type
             self._classify_unity_materials()
 
             # Step 7: Match FBX materials to Unity materials
-            if blender_available and self.fbx_materials:
+            use_fbx_names = bool(self.fbx_materials)
+            if self.fbx_materials:
                 self._match_materials()
                 summary["materials"]["matched"] = len([m for m in self.material_matches.values() if m])
                 summary["materials"]["unmatched"] = len([m for m in self.material_matches.values() if not m])
 
             # Step 8: Generate material files
-            self._generate_materials(use_fbx_names=blender_available)
+            self._generate_materials(use_fbx_names=use_fbx_names)
             summary["materials"]["total"] = len(self.generated_materials)
             summary["materials"]["by_type"] = self._get_type_counts()
 
             # Step 9: Copy FBX files and generate import configs
-            model_count, mesh_count = self._process_models(use_fbx_names=blender_available)
+            model_count, mesh_count = self._process_models(use_fbx_names=use_fbx_names)
             summary["models"] = model_count
             summary["meshes"] = mesh_count
 
@@ -153,8 +164,27 @@ class SyntyConverter:
         if self.config.source_textures_dir:
             self.texture_copier.copy_from_directory(self.config.source_textures_dir)
 
+    def _get_fbx_materials_from_meta(self) -> dict[str, list[str]]:
+        """Extract FBX material names from .meta file mappings.
+
+        The fbx_material_mappings dict has structure:
+            {fbx_filename: {fbx_mat_name: unity_guid}}
+
+        We extract the fbx_mat_name keys as the material list.
+        This is the PRIMARY source - no Blender needed!
+        """
+        result = {}
+        if self.unity_extractor:
+            for fbx_name, mappings in self.unity_extractor.fbx_material_mappings.items():
+                result[fbx_name] = list(mappings.keys())
+        return result
+
     def _analyze_fbx_files(self):
-        """Analyze FBX files to extract actual material names."""
+        """Analyze FBX files to extract actual material names.
+
+        NOTE: This is a FALLBACK method using Blender. The primary source
+        for FBX material names is the .meta files (see _get_fbx_materials_from_meta).
+        """
         fbx_paths = []
 
         # Collect FBX paths
