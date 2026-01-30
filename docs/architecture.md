@@ -1,0 +1,478 @@
+# Architecture
+
+Technical architecture documentation for the Synty Unity-to-Godot Converter.
+
+## Table of Contents
+
+- [System Overview](#system-overview)
+- [Module Dependency Graph](#module-dependency-graph)
+- [Module Responsibilities](#module-responsibilities)
+- [Data Flow (12-Step Pipeline)](#data-flow-12-step-pipeline)
+- [Key Design Decisions](#key-design-decisions)
+- [Extension Points](#extension-points)
+
+---
+
+## System Overview
+
+The Synty Converter follows a single core philosophy: **shaders do the heavy lifting**.
+
+The converter's job is straightforward - wire Unity materials to the correct Godot shader with correct textures and parameters. All the visual complexity (wind animation, water caustics, crystal refraction) lives in the 7 community drop-in shaders from GodotShaders.com.
+
+This approach has several advantages:
+
+1. **Maintainability**: Shader behavior changes require zero converter code changes
+2. **Accuracy**: Community shaders are already tested to match Unity's Synty shaders
+3. **Simplicity**: The converter is purely a data transformation pipeline
+4. **Upgradability**: Shaders can be updated independently of the converter
+
+### Input Sources
+
+| Source | Purpose | Location |
+|--------|---------|----------|
+| Unity Package | Material definitions, shader GUIDs, texture references | `.unitypackage` file |
+| SourceFiles | FBX models, high-quality textures | `SourceFiles/` folder |
+| MaterialList.txt | Mesh-to-material mappings | `SourceFiles/MaterialList.txt` |
+
+### Output Artifacts
+
+| Artifact | Purpose |
+|----------|---------|
+| `.tres` files | Godot ShaderMaterial definitions |
+| `.gdshader` files | 7 drop-in replacement shaders |
+| `.tscn` files | Individual mesh scene files |
+| `project.godot` | Godot project with global shader uniforms |
+| `mesh_material_mapping.json` | Intermediate mapping for Godot CLI |
+
+---
+
+## Module Dependency Graph
+
+```
+converter.py ──┬── unity_package.py
+               │      └── (tarfile, gzip - stdlib)
+               │
+               ├── unity_parser.py
+               │      └── (re - stdlib)
+               │
+               ├── shader_mapping.py
+               │      └── unity_parser.py (UnityMaterial type)
+               │
+               ├── tres_generator.py
+               │      └── shader_mapping.py (MappedMaterial type)
+               │
+               └── material_list.py
+                      └── (json - stdlib)
+
+External Dependencies:
+- Godot 4.6 CLI (headless mode for FBX import and mesh extraction)
+- Python 3.10+ (standard library only - no pip packages required)
+```
+
+### Import Flow
+
+```python
+# converter.py imports:
+from unity_package import extract_unitypackage, GuidMap, get_material_guids, get_material_name
+from unity_parser import parse_material_bytes, UnityMaterial
+from shader_mapping import map_material, detect_shader_type, MappedMaterial
+from tres_generator import generate_tres, write_tres_file, sanitize_filename
+from material_list import parse_material_list, generate_mesh_material_mapping_json
+```
+
+---
+
+## Module Responsibilities
+
+| Module | Input | Output | Responsibility |
+|--------|-------|--------|----------------|
+| `converter.py` | CLI arguments | Converted Godot project | Main orchestrator - runs 12-step pipeline, handles errors, writes logs |
+| `unity_package.py` | `.unitypackage` file | `GuidMap`, extracted content | Extract tar/gzip archive, build GUID-to-pathname mapping |
+| `unity_parser.py` | `.mat` file bytes | `UnityMaterial` dataclass | Parse Unity YAML using regex, extract textures/floats/colors |
+| `shader_mapping.py` | `UnityMaterial` | `MappedMaterial` dataclass | 3-tier shader detection, property name translation, Unity quirk fixes |
+| `tres_generator.py` | `MappedMaterial` | `.tres` file content | Generate Godot ShaderMaterial resource format |
+| `material_list.py` | `MaterialList.txt` | mesh-to-material dict | Parse Unity material list, generate JSON for Godot CLI |
+| `godot_converter.gd` | FBX files + mapping JSON | `.tscn` scene files | GDScript for Godot CLI - extract meshes, assign materials |
+
+### Data Structures
+
+```python
+# unity_parser.py
+@dataclass
+class UnityMaterial:
+    name: str
+    shader_guid: str
+    textures: dict[str, str]    # property_name -> texture_guid
+    floats: dict[str, float]    # property_name -> value
+    colors: dict[str, tuple]    # property_name -> (r, g, b, a)
+
+# shader_mapping.py
+@dataclass
+class MappedMaterial:
+    name: str
+    shader_file: str            # e.g., "foliage.gdshader"
+    textures: dict[str, str]    # godot_param -> texture_path
+    floats: dict[str, float]    # godot_param -> value
+    bools: dict[str, bool]      # godot_param -> value
+    colors: dict[str, tuple]    # godot_param -> (r, g, b, a)
+
+# unity_package.py
+GuidMap = dict[str, str]        # guid -> pathname
+```
+
+---
+
+## Data Flow (12-Step Pipeline)
+
+### Step 1: Validate Inputs
+
+```
+Check existence of:
+  - Unity package (.unitypackage file)
+  - SourceFiles directory
+  - SourceFiles/Textures subdirectory
+  - Godot executable
+
+Fatal error if any missing.
+```
+
+### Step 2: Create Output Directories
+
+```
+output/
+  shaders/      # Drop-in .gdshader files
+  textures/     # Copied from SourceFiles/Textures
+  materials/    # Generated .tres ShaderMaterials
+  models/       # Copied FBX files (structure preserved)
+  meshes/       # Individual .tscn mesh scenes
+```
+
+### Step 3: Extract Unity Package
+
+The `.unitypackage` format is a gzip-compressed tar archive. Each asset is stored as:
+
+```
+<guid>/
+  asset           # The actual file content
+  asset.meta      # Unity metadata
+  pathname        # Plain text path within Unity project
+```
+
+**Output**: `GuidMap` dictionary mapping GUIDs to Unity asset paths.
+
+### Step 4: Parse Unity Materials
+
+For each `.mat` file found in the package:
+
+1. Read raw bytes from tar archive
+2. Decode as UTF-8 (Unity YAML format)
+3. Extract using regex (not YAML parser - see [Design Decisions](#why-regex-over-yaml-parser))
+4. Build `UnityMaterial` with:
+   - Material name (`m_Name`)
+   - Shader GUID (`m_Shader.guid`)
+   - Texture references (`m_TexEnvs` with GUIDs)
+   - Float properties (`m_Floats`)
+   - Color properties (`m_Colors`)
+
+### Step 5: Detect Shaders and Map Properties
+
+**Three-tier shader detection**:
+
+1. **GUID Lookup** (primary): Check `SHADER_GUID_MAP` for 85+ known Unity shader GUIDs
+2. **Name Pattern Scoring**: Match material name against weighted patterns
+3. **Property-Based Detection**: Analyze material properties for shader hints
+
+**Property mapping**:
+- Translate Unity property names to Godot parameter names
+- Apply Unity quirk fixes (alpha=0 colors, boolean-as-float)
+- Apply shader-specific defaults for missing properties
+
+**Output**: `MappedMaterial` with Godot-compatible property names.
+
+### Step 6: Generate .tres Files
+
+For each `MappedMaterial`, generate a Godot ShaderMaterial resource:
+
+```ini
+[gd_resource type="ShaderMaterial" load_steps=3 format=3]
+
+[ext_resource type="Shader" path="res://shaders/foliage.gdshader" id="1"]
+[ext_resource type="Texture2D" path="res://textures/Leaf_01.png" id="2"]
+
+[resource]
+shader = ExtResource("1")
+shader_parameter/leaf_color = ExtResource("2")
+shader_parameter/leaf_smoothness = 0.1
+shader_parameter/enable_breeze = true
+```
+
+### Step 7: Copy Shaders
+
+Copy 7 `.gdshader` files from `shaders/` to output:
+
+- `polygon.gdshader` - Static props, buildings, terrain
+- `foliage.gdshader` - Trees, ferns, grass, vegetation
+- `crystal.gdshader` - Crystals, gems, glass, ice
+- `water.gdshader` - Rivers, lakes, oceans
+- `clouds.gdshader` - Volumetric clouds
+- `particles.gdshader` - Soft particles, fog effects
+- `skydome.gdshader` - Simple gradient sky
+
+### Step 8: Copy Textures
+
+Copy only textures that are actually referenced by generated materials:
+
+1. Build set of required texture names from all materials
+2. Search `SourceFiles/Textures` for matching files
+3. Copy to `output/textures/`
+4. Log warnings for missing textures
+
+### Step 9: Copy FBX Files
+
+Copy FBX models from `SourceFiles/FBX` to `output/models/`:
+
+- Preserve directory structure (Props/, Environment/, Characters/, etc.)
+- Skip non-FBX files
+- Can be skipped with `--skip-fbx-copy` flag
+
+### Step 10: Parse MaterialList.txt
+
+Extract mesh-to-material mappings from `MaterialList.txt`:
+
+```
+Prefab Name: SM_Prop_Crystal_01
+    Mesh Name: SM_Prop_Crystal_01
+        Slot: Crystal_Mat_01 (Uses custom shader)
+        Slot: PolygonNature_Mat_01 (PolygonNature_Texture_01)
+```
+
+**Output**: `mesh_material_mapping.json` for Godot CLI.
+
+### Step 11: Generate project.godot
+
+Write Godot project file with global shader uniforms required by drop-in shaders:
+
+| Uniform | Type | Purpose |
+|---------|------|---------|
+| `WindDirection` | vec3 | Direction for foliage wind animation |
+| `WindIntensity` | float | Strength of wind effect |
+| `GaleStrength` | float | Storm/gust intensity |
+| `MainLightDirection` | vec3 | Sun direction for clouds/sky |
+| `SkyColor` | color | Sky gradient top |
+| `EquatorColor` | color | Sky gradient middle |
+| `GroundColor` | color | Sky gradient bottom |
+| `OceanWavesGradient` | sampler2D | Wave displacement texture |
+
+### Step 12: Run Godot CLI
+
+Two-phase Godot headless execution:
+
+**Phase 1: Import**
+```bash
+godot --headless --import
+```
+- Godot processes all FBX files
+- Generates `.import` metadata files
+- Can timeout on large packs (configurable with `--godot-timeout`)
+
+**Phase 2: Convert**
+```bash
+godot --headless --script res://godot_converter.gd
+```
+- Load each FBX as PackedScene
+- Find all MeshInstance3D nodes
+- Look up materials from mapping JSON
+- Save as individual `.tscn` scene files
+
+---
+
+## Key Design Decisions
+
+### Why Regex Over YAML Parser
+
+Unity `.mat` files use non-standard YAML 1.1 with custom tags:
+
+```yaml
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  m_Name: MyMaterial
+  m_Shader: {fileID: 4800000, guid: abc123, type: 3}
+```
+
+Standard YAML parsers (PyYAML, ruamel) fail on the `!u!21` tags. Rather than preprocessing or using Unity-specific libraries, we use targeted regex extraction:
+
+```python
+# Extract shader GUID
+shader_match = re.search(r'm_Shader:.*?guid:\s*([a-f0-9]{32})', content)
+
+# Extract textures section
+texenvs_match = re.search(r'm_TexEnvs:(.*?)(?=m_Ints:|m_Floats:|m_Colors:|$)', content, re.DOTALL)
+```
+
+**Benefits**:
+- No external dependencies (pure stdlib)
+- Handles Unity's non-standard YAML
+- Extracts exactly what we need
+- ~10x faster than full YAML parsing
+
+### Why GUID-First Shader Detection
+
+Unity shader GUIDs are stable identifiers that persist across Unity versions and asset updates. Using GUIDs as the primary detection method:
+
+1. **Accuracy**: Direct mapping to exact Unity shader
+2. **Reliability**: GUIDs don't change when materials are renamed
+3. **Completeness**: Handles shaders with non-descriptive names
+4. **Performance**: O(1) dictionary lookup vs O(n) pattern matching
+
+The `SHADER_GUID_MAP` currently contains 85+ known GUIDs covering:
+- Core Synty shaders (PolygonLit, Foliage, Particles)
+- Pack-specific shaders (SciFi, Horror, Viking, Racing)
+- Legacy shaders (Amplify-based from 2021)
+
+### Why Scoring System for Name Patterns
+
+Material names often contain multiple keywords that could match different shaders:
+
+```
+"Dirt_Leaves_Triplanar_01"
+  - "Leaves" suggests foliage
+  - "Triplanar" suggests polygon (triplanar mode)
+  - "Dirt" suggests polygon
+```
+
+A simple first-match approach would incorrectly assign foliage shader. The scoring system:
+
+1. Assigns weighted scores to each pattern:
+   - High specificity: "triplanar" = 60, "crystal" = 45
+   - Medium specificity: "tree" = 30, "fern" = 30
+   - Low specificity: "leaves" = 20, "moss" = 15
+
+2. Sums scores per shader type
+
+3. Selects highest-scoring shader (minimum threshold of 20)
+
+**Result**: "Dirt_Leaves_Triplanar_01" scores polygon=75, foliage=20, correctly choosing polygon.
+
+### Why TSCN with External Material References
+
+Early versions embedded materials directly into mesh resources. The current approach uses `.tscn` scene files with external material references:
+
+```ini
+[ext_resource type="ShaderMaterial" path="res://materials/Crystal_Mat_01.tres" id="1"]
+```
+
+**Benefits**:
+- Materials can be edited without re-converting meshes
+- Shared materials across multiple meshes (memory efficient)
+- Clear separation of concerns
+- Easier debugging (human-readable material files)
+
+---
+
+## Extension Points
+
+### Adding New Shader Types
+
+1. **Add shader file**: Place new `.gdshader` in `shaders/` directory
+
+2. **Register GUIDs**: Add Unity shader GUIDs to `SHADER_GUID_MAP` in `shader_mapping.py`:
+   ```python
+   SHADER_GUID_MAP = {
+       "abc123...": "new_shader.gdshader",
+       # ...
+   }
+   ```
+
+3. **Add name patterns**: Add patterns to `SHADER_NAME_PATTERNS` with scoring:
+   ```python
+   "new_shader": [
+       (r"keyword1", 45),  # High specificity
+       (r"keyword2", 30),  # Medium specificity
+   ],
+   ```
+
+4. **Add property detection**: Add to `SHADER_PROPERTY_SIGNATURES`:
+   ```python
+   "new_shader": [
+       "_Unique_Property_1",
+       "_Unique_Property_2",
+   ],
+   ```
+
+5. **Add property mapping**: Create mapping table in `PROPERTY_MAPS`:
+   ```python
+   "new_shader": {
+       "_Unity_Prop": "godot_param",
+       # ...
+   },
+   ```
+
+6. **Update converter.py**: Add filename to `SHADER_FILES` list
+
+### Adding New Property Mappings
+
+1. **Identify Unity property name**: Check `.mat` file in Unity package
+
+2. **Identify Godot parameter name**: Check shader file uniform declarations
+
+3. **Add to appropriate map** in `shader_mapping.py`:
+   ```python
+   PROPERTY_MAPS["foliage"]["_New_Unity_Prop"] = "new_godot_param"
+   ```
+
+4. **Handle type conversion** if needed (boolean-as-float, alpha fix)
+
+### Customizing Defaults
+
+Default values for missing properties are defined per shader in `SHADER_DEFAULTS`:
+
+```python
+SHADER_DEFAULTS = {
+    "crystal.gdshader": {
+        "opacity": 0.7,
+        "metallic": 0.0,
+        "smoothness": 0.85,
+    },
+    "foliage.gdshader": {
+        "leaf_smoothness": 0.1,
+        "trunk_smoothness": 0.15,
+        "leaf_metallic": 0.0,
+        "trunk_metallic": 0.0,
+    },
+    # ...
+}
+```
+
+To customize:
+1. Edit the defaults dictionary
+2. Values apply when Unity material lacks the property
+
+### Adding Unity Quirk Fixes
+
+For new color properties that suffer from alpha=0:
+
+```python
+ALPHA_FIX_PROPERTIES = [
+    "_New_Color_Property",
+    # ...
+]
+```
+
+For new boolean-as-float properties:
+
+```python
+BOOL_PROPERTIES = [
+    "_New_Enable_Feature",
+    # ...
+]
+```
+
+---
+
+## Related Documentation
+
+- [Unity Reference](unity-reference.md) - Unity shader GUIDs and property tables
+- [Shader Reference](shader-reference.md) - Godot shader parameters
+- [Troubleshooting Guide](troubleshooting.md) - Common issues and solutions
