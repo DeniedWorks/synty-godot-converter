@@ -146,6 +146,46 @@ Added mappings for texture properties that trigger auto-enable:
 **Commits:**
 - `8bce757` - Checkpoint before analysis
 - `661155f` - Add extract script and 113 new mappings
+- `8491a3a` - Fix mapping inconsistencies from code review
+
+**Packages Analyzed (29 total, 3,400+ materials):**
+
+| # | Package Name | .mat Files |
+|---|--------------|------------|
+| 1 | POLYGON_Nature | 78 |
+| 2 | POLYGON_Samurai_Empire | 226 |
+| 3 | POLYGON_NatureBiomes_EnchantedForest | 109 |
+| 4 | POLYGON_Fantasy_Kingdom | 92 |
+| 5 | POLYGON_NatureBiomes_AlpineMountain | 139 |
+| 6 | POLYGON_NatureBiomes_AridDesert | 108 |
+| 7 | POLYGON_NatureBiomes_MeadowForest | 130 |
+| 8 | POLYGON_NatureBiomes_SwampMarshland | 82 |
+| 9 | POLYGON_NatureBiomes_TropicalJungle | 123 |
+| 10 | POLYGON_Pirate | 21 |
+| 11 | POLYGON_SciFi_City | 60 |
+| 12 | POLYGON_SciFi_Worlds | 107 |
+| 13 | POLYGON_CyberCity | 219 |
+| 14 | POLYGON_Horror_Asylum | 127 |
+| 15 | POLYGON_Horror_Carnival | 84 |
+| 16 | POLYGON_Horror_Mansion | 181 |
+| 17 | POLYGON_SciFi_Horror | 289 |
+| 18 | POLYGON_Viking_Realm | 163 |
+| 19 | POLYGON_Apocalypse | 111 |
+| 20 | POLYGON_Nightclubs | 104 |
+| 21 | POLYGON_Vikings | 15 |
+| 22 | POLYGON_City | 67 |
+| 23 | POLYGON_City_Zombies | 13 |
+| 24 | POLYGON_Dark_Fantasy | 105 |
+| 25 | POLYGON_Dark_Fortress | 153 |
+| 26 | POLYGON_ElvenRealm | 127 |
+| 27 | POLYGON_Pro_Racer | 230 |
+| 28 | POLYGON_Military | 111 |
+| 29 | POLYGON_Modular_Fantasy_Hero | 33 |
+
+**To analyze additional packs:**
+```bash
+python extract_unity_properties.py "C:\SyntyComplete\YOUR_PACK.unitypackage"
+```
 
 ---
 
