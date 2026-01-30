@@ -117,43 +117,39 @@ Added mappings for texture properties that trigger auto-enable:
 
 ---
 
-## What Still Needs To Be Done
+## What Was Accomplished (P1 - Property Verification) - DONE
 
-### P1 - Verify ALL Unity Properties (NOT DONE)
+### P1 - Verify ALL Unity Properties - COMPLETED 2026-01-30
 
 **Task:** Extract and verify ALL texture/float/color properties from ALL .unitypackage files
 
-**Why:** Current mappings may be incomplete. Need to ensure no Unity properties are being silently dropped.
+**Result:** Analyzed 29 packages with 3,400+ material files.
 
-**Scope:** 40+ .unitypackage files in `C:\SyntyComplete\`
+**Script Created:** `extract_unity_properties.py`
+- Opens .unitypackage as tar.gz
+- Builds GUID -> pathname mapping
+- Parses .mat files for m_TexEnvs, m_Floats, m_Colors sections
+- Extracts property names using indentation-aware parsing
 
-**Process:**
-1. Open each .unitypackage (tar.gz format)
-2. Find `/asset` files where `/pathname` ends in `.mat`
-3. Parse YAML content for:
-   - `m_TexEnvs` section: texture properties (format: `- _Property_Name:`)
-   - `m_Floats` section: float properties (format: `- _Property_Name: value`)
-   - `m_Colors` section: color properties (format: `- _Property_Name: {r:...}`)
-4. Collect unique property names across all packs
-5. Compare against `TEXTURE_MAP_*`, `FLOAT_MAP_*`, `COLOR_MAP_*` in `shader_mapping.py`
-6. Add any missing mappings
+**Mappings Added:** 113 new property mappings including:
 
-**Script idea:**
-```python
-import tarfile
-from pathlib import Path
+| Category | New Mappings |
+|----------|-------------|
+| **Snow System** | `_Snow_Normal_Texture`, `_Snow_Metallic_Smoothness_Texture`, `_Snow_Edge_Noise`, `_Snow_Transition`, `_Snow_Metallic`, `_Snow_Smoothness`, `_Snow_Normal_Intensity` |
+| **Detail Maps** | `_DetailAlbedoMap`, `_DetailNormalMap`, `_DetailMask`, `_DetailNormalMapScale` |
+| **Triplanar** | `_Triplanar_Fade`, `_Triplanar_Intensity`, `_Triplanar_Normal_Intensity_Top/Side/Bottom` |
+| **Particles** | Alpha clip variants, emission, camera fade smoothness |
+| **Water** | `_Shore_Wave_Foam_Noise_Texture`, `_Water_Noise_Texture`, depth properties, caustics intensity |
+| **SciFi Cubemaps** | `_BackTex`, `_FrontTex`, `_LeftTex`, `_RightTex`, `_UpTex`, `_DownTex` |
+| **Boolean Flags** | `_Wind_Enabled`, `_Enable_Detail_Map`, `_Enable_Parallax`, `_Enable_AO`, `_Enable_Shore_Waves`, `_Enable_Ocean_Wave` |
 
-def extract_unity_properties(package_path):
-    """Extract all unique property names from a .unitypackage"""
-    textures, floats, colors = set(), set(), set()
+**Commits:**
+- `8bce757` - Checkpoint before analysis
+- `661155f` - Add extract script and 113 new mappings
 
-    with tarfile.open(package_path, "r:gz") as tar:
-        for member in tar.getmembers():
-            # Find .mat files and parse for properties
-            pass
+---
 
-    return textures, floats, colors
-```
+## What Still Needs To Be Done
 
 ### P2 - Polish Items (NOT DONE)
 
