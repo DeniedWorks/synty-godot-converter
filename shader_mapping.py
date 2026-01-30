@@ -381,6 +381,8 @@ TEXTURE_MAP_FOLIAGE: dict[str, str] = {
     "_Emissive_2_Mask": "emissive_2_mask",
     "_Emissive_Pulse_Map": "emissive_pulse_mask",
     "_Trunk_Emissive_Mask": "trunk_emissive_mask",
+    # Wind noise map (procedural wind variation)
+    "_Breeze_Noise_Map": "breeze_noise_map",
 }
 
 # Polygon Shader (Props, Terrain, Characters, Triplanar)
@@ -449,6 +451,24 @@ TEXTURE_MAP_POLYGON: dict[str, str] = {
     # Legacy/alternative names for moss overlay
     "_Moss": "overlay_texture",
     "_MossTexture": "overlay_texture",
+    # Parallax/Height map (standard Unity PBR)
+    "_ParallaxMap": "height_texture",
+    "_HeightMap": "height_texture",
+    # Alpha/Cutout texture (transparency mask)
+    "_Alpha_Texture": "alpha_texture",
+    # Spherical/Matcap environment mapping
+    "_Spherical_Map": "spherical_map",
+    # Snow overlay textures (auto-enable snow feature when present)
+    "_Snow_Normal_Texture": "snow_normal_texture",
+    "_Snow_Metallic_Smoothness_Texture": "snow_metallic_smoothness",
+    "_Snow_Edge_Noise": "snow_edge_noise",
+    # LED/Screen effects (SciFi packs)
+    "_LED_Panel_Emissive_Wave_01": "led_emissive_wave",
+    "_Pixelation_Map": "pixelation_map",
+    # Detail textures
+    "_DetailAlbedoMap": "detail_albedo",
+    "_DetailNormalMap": "detail_normal",
+    "_DetailMask": "detail_mask",
 }
 
 # Crystal Shader (Crystals, Glass, Gems)
@@ -461,6 +481,9 @@ TEXTURE_MAP_CRYSTAL: dict[str, str] = {
     # Top textures (auto-enable top layer feature when present)
     "_Top_Albedo": "top_albedo",
     "_Top_Normal": "top_normal",
+    # Alternative property names from different packs
+    "_MainTex": "base_albedo",
+    "_BumpMap": "base_normal",
 }
 
 # Water Shader (Rivers, Lakes, Oceans)
@@ -477,17 +500,36 @@ TEXTURE_MAP_WATER: dict[str, str] = {
     "_Shore_Foam_Noise_Texture": "shore_foam_noise_texture",
     "_Water_Normal_Texture": "water_normal_texture",  # Water normal texture
     "_WaterNormal": "water_normal_texture",  # Older naming for water normal
+    # Shore wave foam (separate from shore foam)
+    "_Shore_Wave_Foam_Noise_Texture": "shore_wave_foam_noise_texture",
+    # Water noise/distortion textures
+    "_Water_Noise_Texture": "water_noise_texture",
+    # Standard Unity texture fallbacks
+    "_MainTex": "water_normal_texture",
+    "_BumpMap": "water_normal_texture",
 }
 
 # Particles Shader (Effects, Fog)
 TEXTURE_MAP_PARTICLES: dict[str, str] = {
     "_Albedo_Map": "albedo_map",
+    "_MainTex": "albedo_map",  # Standard Unity particle texture
+    "_EmissionMap": "emission_map",
 }
 
 # Skydome Shader (Sky Gradient)
 # Skydome typically uses no textures - it's a procedural gradient shader.
+# Some packs use cubemap textures for skybox instead of procedural.
 TEXTURE_MAP_SKYDOME: dict[str, str] = {
     # Skydome uses procedural gradient based on _Top_Color and _Bottom_Color
+    # Cubemap textures for SciFi/special skyboxes
+    "_FrontTex": "front_texture",
+    "_BackTex": "back_texture",
+    "_LeftTex": "left_texture",
+    "_RightTex": "right_texture",
+    "_UpTex": "up_texture",
+    "_DownTex": "down_texture",
+    # Standard Unity skybox
+    "_MainTex": "main_texture",
 }
 
 # Clouds Shader (Volumetric Clouds)
@@ -520,17 +562,29 @@ FLOAT_MAP_FOLIAGE: dict[str, str] = {
     # Standard PBR
     "_Metallic": "metallic",
     "_Smoothness": "smoothness",
+    "_Glossiness": "smoothness",  # Alternative name
     "_LeafSmoothness": "leaf_smoothness",
     "_Leaf_Smoothness": "leaf_smoothness",
+    "_Leaf_Metallic": "leaf_metallic",
     "_TrunkSmoothness": "trunk_smoothness",
     "_Trunk_Smoothness": "trunk_smoothness",
+    "_Trunk_Metallic": "trunk_metallic",
     # Wind animation parameters
     "_Breeze_Strength": "breeze_strength",
     "_Light_Wind_Strength": "light_wind_strength",
     "_Strong_Wind_Strength": "strong_wind_strength",
     "_Wind_Twist_Strength": "wind_twist_strength",
+    "_Gale_Blend": "gale_blend",
+    "_Light_Wind_Y_Strength": "light_wind_y_strength",
+    "_Light_Wind_Y_Offset": "light_wind_y_offset",
     # Alpha cutoff (for leaf transparency)
     "_Alpha_Clip_Threshold": "alpha_clip_threshold",
+    # Normal intensity
+    "_Normal_Intensity": "normal_intensity",
+    "_BumpScale": "normal_intensity",
+    # Frosting (snow on foliage)
+    "_Frosting_Falloff": "frosting_falloff",
+    "_Frosting_Height": "frosting_height",
     # Legacy names (2021 and earlier)
     "_Leaves_WindAmount": "breeze_strength",
     "_Tree_WindAmount": "light_wind_strength",
@@ -615,25 +669,59 @@ FLOAT_MAP_POLYGON: dict[str, str] = {
     "_Edge_Distortion_Intensity": "edge_distortion_intensity",
     "_Speed_X": "speed_x",
     "_Speed_Y": "speed_y",
+    # Snow overlay properties
+    "_Snow_Level": "snow_level",
+    "_Snow_Transition": "snow_transition",
+    "_Snow_Metallic": "snow_metallic",
+    "_Snow_Smoothness": "snow_smoothness",
+    "_Snow_Normal_Intensity": "snow_normal_intensity",
+    # Triplanar properties
+    "_Triplanar_Fade": "triplanar_fade",
+    "_Triplanar_Intensity": "triplanar_intensity",
+    "_Triplanar_Normal_Intensity_Top": "triplanar_normal_intensity_top",
+    "_Triplanar_Normal_Intensity_Side": "triplanar_normal_intensity_side",
+    "_Triplanar_Normal_Intensity_Bottom": "triplanar_normal_intensity_bottom",
+    # Emission intensity
+    "_Emission_Intensity": "emission_intensity",
+    # Detail texture properties
+    "_DetailNormalMapScale": "detail_normal_scale",
 }
 
 FLOAT_MAP_CRYSTAL: dict[str, str] = {
     "_Metallic": "metallic",
     "_Smoothness": "smoothness",
+    "_Glossiness": "smoothness",  # Alternative name
     "_Opacity": "opacity",
     "_Fresnel_Power": "fresnel_power",
+    "_Refraction_Strength": "refraction_strength",
+    "_Deep_Depth": "deep_depth",
+    "_Shallow_Depth": "shallow_depth",
+    "_Normal_Intensity": "normal_intensity",
+    "_BumpScale": "normal_intensity",
 }
 
 FLOAT_MAP_WATER: dict[str, str] = {
     "_Smoothness": "smoothness",
+    "_Glossiness": "smoothness",  # Alternative name
     "_Metallic": "metallic",
     "_Base_Opacity": "base_opacity",
+    "_Shallows_Opacity": "shallows_opacity",
     "_Maximum_Depth": "maximum_depth",
     "_Normal_Intensity": "normal_intensity",
+    "_BumpScale": "normal_intensity",  # Alternative name
     "_Shore_Wave_Speed": "shore_wave_speed",
     "_Ocean_Wave_Height": "ocean_wave_height",
     "_Ocean_Wave_Speed": "ocean_wave_speed",
     "_Distortion_Strength": "distortion_strength",
+    # Depth properties
+    "_Deep_Height": "deep_height",
+    "_Very_Deep_Height": "very_deep_height",
+    "_Depth_Distance": "depth_distance",
+    "_Water_Depth": "water_depth",
+    # Foam properties
+    "_Shore_Foam_Intensity": "shore_foam_intensity",
+    "_Caustics_Intensity": "caustics_intensity",
+    "_Shallow_Intensity": "shallow_intensity",
     # Waterfall (ElvenRealm)
     "_FresnelPower": "fresnel_power",
     "_UVScrollSpeed": "uv_scroll_speed",
@@ -641,10 +729,15 @@ FLOAT_MAP_WATER: dict[str, str] = {
 
 FLOAT_MAP_PARTICLES: dict[str, str] = {
     "_Alpha_Clip_Treshold": "alpha_clip_treshold",  # Note: Unity typo preserved for compatibility
+    "_Alpha_Clip_Threshold": "alpha_clip_treshold",  # Correct spelling variant
+    "_Cutoff": "alpha_clip_treshold",
+    "_AlphaCutoff": "alpha_clip_treshold",
     "_Soft_Power": "soft_power",
     "_Soft_Distance": "soft_distance",
     "_Camera_Fade_Near": "camera_fade_near",
     "_Camera_Fade_Far": "camera_fade_far",
+    "_Camera_Fade_Smoothness": "camera_fade_smoothness",
+    "_View_Edge_Power": "view_edge_power",
     "_Fog_Density": "fog_density",
 }
 
@@ -690,8 +783,11 @@ FLOAT_MAPS: dict[str, dict[str, str]] = {
 COLOR_MAP_FOLIAGE: dict[str, str] = {
     "_Color": "color_tint",
     "_Color_Tint": "color_tint",
+    "_BaseColor": "color_tint",  # URP variant
     "_Leaf_Base_Color": "leaf_base_color",
     "_Trunk_Base_Color": "trunk_base_color",
+    "_Leaf_Noise_Color": "leaf_noise_color",
+    "_Trunk_Noise_Color": "trunk_noise_color",
     "_Emissive_Color": "emissive_color",
     "_Emissive_2_Color": "emissive_2_color",
     "_Trunk_Emissive_Color": "trunk_emissive_color",
@@ -767,6 +863,10 @@ COLOR_MAP_WATER: dict[str, str] = {
     "_Caustics_Color": "caustics_color",
     "_Shore_Foam_Color_Tint": "shore_foam_color_tint",
     "_Shore_Wave_Color_Tint": "shore_wave_color_tint",
+    # Base/Tint colors
+    "_Color": "color_tint",
+    "_Color_Tint": "color_tint",
+    "_BaseColor": "color_tint",
     # Legacy property names (older packs)
     "_WaterDeepColor": "deep_color",
     "_WaterShallowColor": "shallow_color",
@@ -781,7 +881,11 @@ COLOR_MAP_WATER: dict[str, str] = {
 
 COLOR_MAP_PARTICLES: dict[str, str] = {
     "_Base_Color": "base_color",
+    "_Color": "base_color",  # Standard Unity particle color
+    "_Color_Tint": "base_color",
+    "_BaseColor": "base_color",
     "_Fog_Color": "fog_color",
+    "_EmissionColor": "emission_color",
 }
 
 COLOR_MAP_SKYDOME: dict[str, str] = {
@@ -910,6 +1014,9 @@ ALPHA_FIX_PROPERTIES: set[str] = {
     "_Color_Stubble",
     "_Color_Scar",
     "_Color_BodyArt",
+    # Foliage noise colors
+    "_Leaf_Noise_Color",
+    "_Trunk_Noise_Color",
 }
 
 # =============================================================================
@@ -937,6 +1044,7 @@ BOOLEAN_FLOAT_PROPERTIES: set[str] = {
     "_Enable_Strong_Wind",
     "_Enable_Wind_Twist",
     "_Enable_Frosting",
+    "_Wind_Enabled",
     # Legacy wind toggles (stored as float)
     "_Leaves_Wave",
     "_Tree_Wave",
@@ -961,10 +1069,15 @@ BOOLEAN_FLOAT_PROPERTIES: set[str] = {
     "_Enable_UV_Distortion",
     "_Enable_Brightness_Breakup",
     "_Enable_Wave",
+    "_Enable_Detail_Map",
+    "_Enable_Parallax",
+    "_Enable_AO",
     # Water effect toggles
     "_Enable_Shore_Wave_Foam",
     "_Enable_Shore_Foam",
+    "_Enable_Shore_Waves",
     "_Enable_Ocean_Waves",
+    "_Enable_Ocean_Wave",
     "_Enable_Caustics",
     "_Enable_Distortion",
     # Waterfall
