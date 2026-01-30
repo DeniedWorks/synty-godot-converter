@@ -1,6 +1,6 @@
 # Synty Converter - Session Handoff Document
 
-**Date:** 2026-01-30
+**Last Updated:** 2026-01-30
 **Project:** `C:\Godot\Projects\synty-converter\`
 **Purpose:** Convert Unity Synty asset packs to Godot 4.6 projects with proper materials, shaders, and scene files.
 
@@ -147,6 +147,10 @@ Added mappings for texture properties that trigger auto-enable:
 - `8bce757` - Checkpoint before analysis
 - `661155f` - Add extract script and 113 new mappings
 - `8491a3a` - Fix mapping inconsistencies from code review
+- `ea02e1e` - P2 polish items
+- `a006e88` - Support existing Godot projects
+- `0c126bc` - Simplify output structure
+- `98e0f85` - Remove shaders/ from pack folder
 
 **Packages Analyzed (29 total, 3,400+ materials):**
 
@@ -207,19 +211,48 @@ python extract_unity_properties.py "C:\SyntyComplete\YOUR_PACK.unitypackage"
 
 ## What Still Needs To Be Done
 
-### P2 - Polish Items (NOT DONE)
+### P2 - Polish Items - DONE
 
-1. **High-quality texture imports**
-   - Generate `.import` files for each texture with `filter=false` for pixel art look
-   - Or set project-wide import defaults in `project.godot`
+1. **High-quality texture imports** - DONE
+   - Generate `.import` files for each texture with VRAM compressed + high_quality
+   - Textures now import with optimal settings for 3D assets
 
-2. **Dynamic project name**
-   - Change `PROJECT_GODOT_TEMPLATE` (line 87) to use pack name
-   - Currently hardcoded as `"Synty Converted Assets"`
+2. **Dynamic project name** - DONE
+   - `project.godot` now uses pack name dynamically
+   - Example: `PolygonNature` produces project named "PolygonNature"
 
 3. **Track missing material warnings in stats** - DONE
    - Added `materials_missing: int = 0` field to `ConversionStats`
    - Counter incremented in Step 9.5 after calculating missing materials
+
+### P2.5 - Output Structure Simplification - DONE
+
+Simplified output to one consistent structure:
+
+```
+output/
+├── project.godot          # At project root (merged if existing)
+├── shaders/               # At project root
+│   ├── polygon.gdshader
+│   ├── foliage.gdshader
+│   └── ...
+└── PackName/              # Pack assets in subfolder
+    ├── materials/
+    ├── models/
+    ├── textures/
+    └── scenes/
+```
+
+**Key changes:**
+- `project.godot` and `shaders/` always at project root
+- Pack assets organized in subfolder named after pack
+- Supports existing Godot projects - shader uniforms merge into existing `project.godot`
+- Multiple packs can coexist in same project
+
+**Commits:**
+- `a006e88` - Support existing Godot projects
+- `0c126bc` - Simplify output structure
+- `98e0f85` - Remove shaders/ from pack folder
 
 ### P3 - Testing (NOT DONE)
 
@@ -233,6 +266,15 @@ python extract_unity_properties.py "C:\SyntyComplete\YOUR_PACK.unitypackage"
    - `PolygonNature` - has foliage, water, triplanar terrain
    - `PolygonFantasyKingdom` - has crystals
    - `PolygonSciFi` - has emission, holograms
+
+3. **BUG TO FIX - Shader Detection Bug:**
+   - SM_Plant materials incorrectly get `foliage.gdshader` instead of `polygon.gdshader`
+   - The `uses_custom_shader=False` check should always return `polygon.gdshader`
+   - But name pattern matching is overriding this check
+   - **Fix needed in:**
+     - `shader_mapping.py` - `determine_shader()` function (lines 1830-2012)
+     - `converter.py` - `build_shader_cache()` (lines 1057-1112)
+   - Root cause: Name pattern scoring runs even when `uses_custom_shader=False`
 
 ---
 
