@@ -424,12 +424,11 @@ def setup_output_directories(output_dir: Path, dry_run: bool) -> None:
             logger.debug("Created directory: %s", directory)
 
 
-def copy_shaders(source_dir: Path, output_dir: Path, dry_run: bool) -> int:
-    """Copy .gdshader files from project's shaders/ to output/shaders/.
+def copy_shaders(shaders_dest: Path, dry_run: bool) -> int:
+    """Copy .gdshader files from project's shaders/ to destination.
 
     Args:
-        source_dir: Directory containing the converter project (with shaders/ subfolder).
-        output_dir: Output directory (shaders will be copied to output_dir/shaders/).
+        shaders_dest: Destination directory for shader files.
         dry_run: If True, only log what would be copied.
 
     Returns:
@@ -438,15 +437,25 @@ def copy_shaders(source_dir: Path, output_dir: Path, dry_run: bool) -> int:
     # Source shaders are relative to where this script is located
     script_dir = Path(__file__).parent
     shaders_source = script_dir / "shaders"
-    shaders_dest = output_dir / "shaders"
+
+    # Ensure destination directory exists
+    if not dry_run:
+        shaders_dest.mkdir(parents=True, exist_ok=True)
 
     copied = 0
+    skipped = 0
     for shader_file in SHADER_FILES:
         source_path = shaders_source / shader_file
         dest_path = shaders_dest / shader_file
 
         if not source_path.exists():
             logger.warning("Shader file not found: %s", source_path)
+            continue
+
+        # Skip if shader already exists (shared shaders persist across packs)
+        if dest_path.exists():
+            logger.debug("Shader already exists, skipping: %s", shader_file)
+            skipped += 1
             continue
 
         if dry_run:
@@ -457,7 +466,10 @@ def copy_shaders(source_dir: Path, output_dir: Path, dry_run: bool) -> int:
 
         copied += 1
 
-    logger.info("Copied %d shader files", copied)
+    if skipped > 0:
+        logger.info("Copied %d shader files (%d already existed)", copied, skipped)
+    else:
+        logger.info("Copied %d shader files", copied)
     return copied
 
 
@@ -1028,27 +1040,195 @@ def count_tscn_files(meshes_dir: Path) -> int:
     return len(list(meshes_dir.rglob("*.tscn")))
 
 
-def generate_project_godot(output_dir: Path, pack_name: str, dry_run: bool) -> None:
-    """Write project.godot with global shader uniforms.
+def _extract_shader_globals_section(content: str) -> str:
+    """Extract the [shader_globals] section from a project.godot content string.
 
     Args:
-        output_dir: Output directory where project.godot will be written.
-        pack_name: Name of the pack to use as the project name.
+        content: Full project.godot file content.
+
+    Returns:
+        The [shader_globals] section including the header, or empty string if not found.
+    """
+    lines = content.split("\n")
+    in_section = False
+    section_lines = []
+
+    for line in lines:
+        if line.strip() == "[shader_globals]":
+            in_section = True
+            section_lines.append(line)
+        elif in_section:
+            # New section starts - stop collecting
+            if line.startswith("[") and line.endswith("]"):
+                break
+            section_lines.append(line)
+
+    return "\n".join(section_lines)
+
+
+def _parse_shader_globals(section: str) -> dict[str, str]:
+    """Parse shader globals section into a dict of uniform_name -> full definition.
+
+    Args:
+        section: The [shader_globals] section content (including or excluding header).
+
+    Returns:
+        Dictionary mapping uniform names to their full definition strings.
+    """
+    uniforms: dict[str, str] = {}
+    lines = section.split("\n")
+    current_name = None
+    current_lines: list[str] = []
+
+    for line in lines:
+        if line.strip() == "[shader_globals]":
+            continue
+
+        # Check if this is a new uniform definition (Name={)
+        if "={" in line and not line.startswith(" ") and not line.startswith("\t"):
+            # Save previous uniform if any
+            if current_name:
+                uniforms[current_name] = "\n".join(current_lines)
+
+            # Start new uniform
+            name_part = line.split("={")[0]
+            current_name = name_part.strip()
+            current_lines = [line]
+        elif current_name:
+            current_lines.append(line)
+            # Check if uniform definition is complete (ends with })
+            if line.strip() == "}":
+                uniforms[current_name] = "\n".join(current_lines)
+                current_name = None
+                current_lines = []
+
+    # Handle last uniform if not closed properly
+    if current_name:
+        uniforms[current_name] = "\n".join(current_lines)
+
+    return uniforms
+
+
+def _merge_shader_globals(existing_content: str, template_section: str) -> str:
+    """Merge shader globals from template into existing project.godot content.
+
+    Args:
+        existing_content: Full existing project.godot file content.
+        template_section: The [shader_globals] section from template to merge.
+
+    Returns:
+        Updated project.godot content with merged shader globals.
+    """
+    # Extract existing shader globals section
+    existing_section = _extract_shader_globals_section(existing_content)
+
+    # Parse uniforms from both
+    template_uniforms = _parse_shader_globals(template_section)
+    existing_uniforms = _parse_shader_globals(existing_section) if existing_section else {}
+
+    # Find uniforms to add (in template but not in existing)
+    new_uniforms = {
+        name: definition
+        for name, definition in template_uniforms.items()
+        if name not in existing_uniforms
+    }
+
+    if not new_uniforms:
+        logger.info("All shader uniforms already present in existing project.godot")
+        return existing_content
+
+    logger.info("Adding %d new shader uniform(s): %s", len(new_uniforms), ", ".join(new_uniforms.keys()))
+
+    if existing_section:
+        # Append new uniforms to existing section
+        # Find where the existing section ends and insert before next section
+        lines = existing_content.split("\n")
+        result_lines = []
+        in_section = False
+        section_ended = False
+
+        for i, line in enumerate(lines):
+            if line.strip() == "[shader_globals]":
+                in_section = True
+                result_lines.append(line)
+            elif in_section and line.startswith("[") and line.endswith("]"):
+                # New section starts - insert new uniforms before it
+                in_section = False
+                section_ended = True
+                for uniform_def in new_uniforms.values():
+                    result_lines.append(uniform_def)
+                result_lines.append(line)
+            else:
+                result_lines.append(line)
+
+        # If we were still in section at EOF, append uniforms
+        if in_section and not section_ended:
+            for uniform_def in new_uniforms.values():
+                result_lines.append(uniform_def)
+
+        return "\n".join(result_lines)
+    else:
+        # No existing shader_globals section - append the entire template section
+        return existing_content.rstrip() + "\n\n" + template_section
+
+
+def generate_project_godot(
+    output_dir: Path,
+    pack_name: str,
+    dry_run: bool,
+    existing_project: bool = False,
+) -> None:
+    """Write or update project.godot with global shader uniforms.
+
+    When existing_project is False (default), creates a new project.godot file
+    with the pack name and all shader uniforms from the template.
+
+    When existing_project is True, reads the existing project.godot and merges
+    in any missing shader uniforms from the template, preserving all other
+    settings (project name, etc.).
+
+    Args:
+        output_dir: Output directory where project.godot will be written/updated.
+        pack_name: Name of the pack to use as the project name (only used when
+            existing_project is False).
         dry_run: If True, only log what would be written.
+        existing_project: If True, merge shader uniforms into existing file
+            instead of overwriting.
     """
     project_path = output_dir / "project.godot"
 
     if dry_run:
-        logger.info("[DRY RUN] Would write project.godot to: %s", project_path)
+        if existing_project and project_path.exists():
+            logger.info("[DRY RUN] Would merge shader uniforms into: %s", project_path)
+        else:
+            logger.info("[DRY RUN] Would write project.godot to: %s", project_path)
         return
 
-    # Replace the hardcoded project name with the pack name
-    project_content = PROJECT_GODOT_TEMPLATE.replace(
-        'config/name="Synty Converted Assets"',
-        f'config/name="{pack_name}"'
-    )
-    project_path.write_text(project_content, encoding="utf-8")
-    logger.info("Wrote project.godot with project name '%s'", pack_name)
+    if existing_project and project_path.exists():
+        # Read existing content
+        existing_content = project_path.read_text(encoding="utf-8")
+
+        # Extract shader_globals section from template
+        template_section = _extract_shader_globals_section(PROJECT_GODOT_TEMPLATE)
+
+        if not template_section:
+            logger.warning("No [shader_globals] section found in template")
+            return
+
+        # Merge uniforms
+        updated_content = _merge_shader_globals(existing_content, template_section)
+
+        # Write back
+        project_path.write_text(updated_content, encoding="utf-8")
+        logger.info("Updated project.godot with merged shader uniforms")
+    else:
+        # Original behavior: write new project.godot with pack name
+        project_content = PROJECT_GODOT_TEMPLATE.replace(
+            'config/name="Synty Converted Assets"',
+            f'config/name="{pack_name}"'
+        )
+        project_path.write_text(project_content, encoding="utf-8")
+        logger.info("Wrote project.godot with project name '%s'", pack_name)
 
 
 def write_conversion_log(output_dir: Path, stats: ConversionStats, config: ConversionConfig) -> None:
@@ -1233,7 +1413,7 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
     8. Copy required textures from SourceFiles/Textures
     8.5. Copy FBX files from SourceFiles/FBX (unless --skip-fbx-copy)
     9. Generate mesh_material_mapping.json (uses cached prefabs)
-    10. Generate project.godot with global shader uniforms
+    10. Generate project.godot with global shader uniforms (if not existing project)
     11. Run Godot CLI to convert FBX to .tscn (unless --skip-godot-cli)
 
     Args:
@@ -1257,6 +1437,9 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
     """
     stats = ConversionStats()
 
+    # Detect if output_dir is an existing Godot project
+    existing_project = (config.output_dir / "project.godot").exists()
+
     # Extract pack name from source_files parent directory
     # e.g., C:\SyntyComplete\PolygonNature\SourceFiles -> pack_name = "PolygonNature"
     raw_pack_name = config.source_files.parent.name
@@ -1264,14 +1447,35 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
     pack_name = sanitize_filename(raw_pack_name)
     if pack_name != raw_pack_name:
         logger.warning("Pack name sanitized: '%s' -> '%s'", raw_pack_name, pack_name)
-    pack_output_dir = config.output_dir / pack_name
+
+    # Determine output structure based on whether we're adding to an existing project
+    if existing_project:
+        # Adding to existing Godot project:
+        # - Assets go in pack subfolder: output_dir/pack_name/
+        # - Shaders go at project root: output_dir/shaders/
+        # - project.godot already exists, don't overwrite
+        pack_output_dir = config.output_dir / pack_name
+        shaders_dir = config.output_dir / "shaders"
+        project_dir = config.output_dir  # For Godot CLI
+        logger.info("Detected existing Godot project at: %s", config.output_dir)
+    else:
+        # Creating new standalone project:
+        # - Pack folder becomes the project root: output_dir/pack_name/
+        # - Shaders inside pack folder: output_dir/pack_name/shaders/
+        # - Generate project.godot in pack folder
+        pack_output_dir = config.output_dir / pack_name
+        shaders_dir = pack_output_dir / "shaders"
+        project_dir = pack_output_dir  # For Godot CLI
 
     # Step 1: Validate inputs (already done in parse_args, but double-check)
     logger.info("Starting conversion pipeline...")
     logger.info("  Pack Name: %s", pack_name)
     logger.info("  Unity Package: %s", config.unity_package)
     logger.info("  Source Files: %s", config.source_files)
-    logger.info("  Output: %s", pack_output_dir)
+    logger.info("  Pack Output: %s", pack_output_dir)
+    logger.info("  Existing Project: %s", existing_project)
+    logger.info("  Shaders Dir: %s", shaders_dir)
+    logger.info("  Project Dir: %s", project_dir)
 
     # Step 2: Create output directory structure
     logger.info("Creating output directory structure...")
@@ -1411,8 +1615,7 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
         # Step 7: Copy .gdshader files
         logger.info("Copying shader files...")
         stats.shaders_copied = copy_shaders(
-            config.source_files,  # Not actually used - we use script directory
-            pack_output_dir,
+            shaders_dir,
             config.dry_run,
         )
 
@@ -1455,8 +1658,9 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
             logger.info("Skipping FBX copy (--skip-fbx-copy)")
 
         # Step 9: Generate mesh_material_mapping.json (uses prefabs parsed in Step 4.5)
+        # Note: mapping goes to shaders_dir to be shared across packs
         if prefabs:
-            mapping_output = pack_output_dir / "mesh_material_mapping.json"
+            mapping_output = shaders_dir / "mesh_material_mapping.json"
             if config.dry_run:
                 logger.info("[DRY RUN] Would write mesh_material_mapping.json")
             else:
@@ -1492,9 +1696,13 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
         else:
             logger.info("No MaterialList data available, skipping mesh-material mapping")
 
-        # Step 11: Generate project.godot
-        logger.info("Generating project.godot...")
-        generate_project_godot(pack_output_dir, pack_name, config.dry_run)
+        # Step 11: Generate or update project.godot
+        if existing_project:
+            logger.info("Merging shader uniforms into existing project.godot...")
+            generate_project_godot(project_dir, pack_name, config.dry_run, existing_project=True)
+        else:
+            logger.info("Generating project.godot...")
+            generate_project_godot(project_dir, pack_name, config.dry_run, existing_project=False)
 
         # Step 12: Run Godot CLI to convert FBX to .tscn scene files
         if not config.skip_godot_cli:
@@ -1506,7 +1714,7 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
                 stats.godot_timeout_occurred,
             ) = run_godot_cli(
                 config.godot_exe,
-                pack_output_dir,
+                project_dir,
                 config.godot_timeout,
                 config.dry_run,
             )
@@ -1533,8 +1741,9 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
             logger.info("Skipping Godot CLI (--skip-godot-cli)")
 
         # Write conversion log (not in dry run for the log file itself)
+        # Note: log goes to shaders_dir to be shared across packs
         if not config.dry_run:
-            write_conversion_log(pack_output_dir, stats, config)
+            write_conversion_log(shaders_dir, stats, config)
 
         return stats
 
