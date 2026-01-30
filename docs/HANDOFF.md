@@ -116,7 +116,7 @@ I need you to continue work on the **synty-converter** project. Here's the compl
 
 6. **High-quality texture imports** - Generate `.import` files or set project-wide defaults
 7. **Dynamic project name** - Use pack name instead of "Synty Converted Assets"
-8. **Track missing material warnings** - Add to `stats.warnings`
+8. **Track missing material warnings** - DONE (added `stats.materials_missing` counter)
 
 #### P3 - Consider (Low priority)
 

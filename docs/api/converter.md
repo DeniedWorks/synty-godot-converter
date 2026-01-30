@@ -101,6 +101,7 @@ Statistics dataclass collected during conversion.
 class ConversionStats:
     materials_parsed: int = 0
     materials_generated: int = 0
+    materials_missing: int = 0
     textures_copied: int = 0
     textures_missing: int = 0
     shaders_copied: int = 0
@@ -120,6 +121,7 @@ class ConversionStats:
 |-----------|------|-------------|
 | `materials_parsed` | `int` | Number of Unity materials successfully parsed |
 | `materials_generated` | `int` | Number of Godot `.tres` materials generated |
+| `materials_missing` | `int` | Number of materials referenced by meshes but not found |
 | `textures_copied` | `int` | Number of texture files copied |
 | `textures_missing` | `int` | Number of textures that could not be found |
 | `shaders_copied` | `int` | Number of shader files copied |

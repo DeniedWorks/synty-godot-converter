@@ -217,9 +217,9 @@ python extract_unity_properties.py "C:\SyntyComplete\YOUR_PACK.unitypackage"
    - Change `PROJECT_GODOT_TEMPLATE` (line 87) to use pack name
    - Currently hardcoded as `"Synty Converted Assets"`
 
-3. **Track missing material warnings in stats**
-   - Add count of missing materials to `ConversionStats`
-   - Currently logs warnings but doesn't track in stats
+3. **Track missing material warnings in stats** - DONE
+   - Added `materials_missing: int = 0` field to `ConversionStats`
+   - Counter incremented in Step 9.5 after calculating missing materials
 
 ### P3 - Testing (NOT DONE)
 

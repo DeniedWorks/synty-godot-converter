@@ -35,7 +35,9 @@ Pipeline Steps:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import logging
+import random
 import re
 import shutil
 import subprocess
@@ -82,6 +84,44 @@ FALLBACK_TEXTURE_PATTERNS = [
     "*_Texture_01_A.png",          # Fallback: any pack with _A suffix
     "Texture_01.png",              # Simple naming
 ]
+
+# Template for .import sidecar files for textures
+# This configures VRAM compression (mode=2) with high quality
+TEXTURE_IMPORT_TEMPLATE = """[remap]
+
+importer="texture"
+type="CompressedTexture2D"
+uid="uid://{uid}"
+path="res://.godot/imported/{filename}-{hash}.ctex"
+metadata={{
+"vram_texture": true
+}}
+
+[deps]
+
+source_file="{res_path}"
+dest_files=["res://.godot/imported/{filename}-{hash}.ctex"]
+
+[params]
+
+compress/mode=2
+compress/high_quality=true
+compress/lossy_quality=0.7
+compress/hdr_compression=1
+compress/normal_map=0
+compress/channel_pack=0
+mipmaps/generate=true
+mipmaps/limit=-1
+roughness/mode=0
+roughness/src_normal=""
+process/fix_alpha_border=true
+process/premult_alpha=false
+process/normal_map_invert_y=false
+process/hdr_as_srgb=false
+process/hdr_clamp_exposure=false
+process/size_limit=0
+detect_3d/compress_to=1
+"""
 
 # project.godot template with global shader uniforms
 PROJECT_GODOT_TEMPLATE = """; Engine configuration file.
@@ -189,6 +229,9 @@ class ConversionStats:
             the unitypackage. Incremented in Step 4 of the pipeline.
         materials_generated: Number of Godot .tres material files written to
             output/materials/. Includes both converted and placeholder materials.
+        materials_missing: Number of materials referenced by meshes in
+            MaterialList.txt but not found in output/materials/. These meshes
+            will use Godot's default material at runtime.
         textures_copied: Number of texture files successfully copied from
             SourceFiles/Textures to output/textures/.
         textures_fallback: Number of missing textures substituted with the pack's
@@ -225,6 +268,7 @@ class ConversionStats:
 
     materials_parsed: int = 0
     materials_generated: int = 0
+    materials_missing: int = 0
     textures_copied: int = 0
     textures_fallback: int = 0
     textures_missing: int = 0
@@ -503,6 +547,52 @@ def find_texture_file(textures_dir: Path, texture_name: str) -> Path | None:
     return None
 
 
+def generate_texture_import_file(texture_path: Path) -> None:
+    """Generate a .import sidecar file for a texture with VRAM compression settings.
+
+    Creates a Godot .import file that configures the texture to use VRAM
+    compression (mode=2) with high quality settings. This prevents textures
+    from appearing yellow or incorrectly imported in Godot.
+
+    The .import file is placed next to the texture file with the same name
+    plus ".import" extension (e.g., "MyTexture.png.import").
+
+    Args:
+        texture_path: Absolute path to the texture file that was copied.
+
+    Example:
+        >>> generate_texture_import_file(Path("output/textures/Ground_01.png"))
+        # Creates: output/textures/Ground_01.png.import
+    """
+    # Calculate the res:// path for the texture
+    # The texture is in textures/ subdirectory, so res://textures/filename
+    filename = texture_path.name
+    res_path = f"res://textures/{filename}"
+
+    # Generate a unique hash for this texture (based on filename + random)
+    # Godot uses this to track imported files
+    hash_input = f"{filename}{random.randint(0, 999999999)}"
+    file_hash = hashlib.md5(hash_input.encode()).hexdigest()[:12]
+
+    # Generate a unique uid (Godot's resource UID format)
+    # Format: alphanumeric characters, variable length
+    uid_chars = "abcdefghijklmnopqrstuvwxyz0123456789"
+    uid = "".join(random.choice(uid_chars) for _ in range(5 + random.randint(0, 8)))
+
+    # Format the template
+    import_content = TEXTURE_IMPORT_TEMPLATE.format(
+        uid=uid,
+        filename=filename,
+        hash=file_hash,
+        res_path=res_path,
+    )
+
+    # Write the .import file
+    import_path = texture_path.parent / f"{filename}.import"
+    import_path.write_text(import_content, encoding="utf-8")
+    logger.debug("Generated import file: %s", import_path.name)
+
+
 def copy_textures(
     source_textures: Path,
     output_textures: Path,
@@ -516,7 +606,8 @@ def copy_textures(
 
     Iterates through the set of required texture names, finds each one in the
     source directory (using find_texture_file), and copies it to the output.
-    Original file extensions are preserved.
+    Original file extensions are preserved. For each copied texture, a .import
+    sidecar file is also generated with VRAM compression settings.
 
     When texture_guid_to_path and texture_name_to_guid are provided, textures
     are first looked up by GUID and copied from the temp files extracted from
@@ -584,6 +675,7 @@ def copy_textures(
                 logger.info("[DRY RUN] Would copy texture from temp: %s", texture_name)
             else:
                 shutil.copy2(temp_path, dest_path)
+                generate_texture_import_file(dest_path)
                 logger.debug("Copied texture from temp: %s", texture_name)
 
             copied += 1
@@ -615,6 +707,7 @@ def copy_textures(
                     )
                 else:
                     shutil.copy2(fallback_texture, dest_path)
+                    generate_texture_import_file(dest_path)
                     logger.debug(
                         "Copied fallback texture: %s -> %s (for missing %s)",
                         fallback_texture.name, dest_name, texture_name
@@ -641,6 +734,7 @@ def copy_textures(
             logger.info("[DRY RUN] Would copy texture: %s -> %s", source_path.name, dest_name)
         else:
             shutil.copy2(source_path, dest_path)
+            generate_texture_import_file(dest_path)
             if source_path.name != dest_name:
                 logger.debug("Copied texture: %s -> %s (renamed)", source_path.name, dest_name)
             else:
@@ -934,11 +1028,12 @@ def count_tscn_files(meshes_dir: Path) -> int:
     return len(list(meshes_dir.rglob("*.tscn")))
 
 
-def generate_project_godot(output_dir: Path, dry_run: bool) -> None:
+def generate_project_godot(output_dir: Path, pack_name: str, dry_run: bool) -> None:
     """Write project.godot with global shader uniforms.
 
     Args:
         output_dir: Output directory where project.godot will be written.
+        pack_name: Name of the pack to use as the project name.
         dry_run: If True, only log what would be written.
     """
     project_path = output_dir / "project.godot"
@@ -947,8 +1042,13 @@ def generate_project_godot(output_dir: Path, dry_run: bool) -> None:
         logger.info("[DRY RUN] Would write project.godot to: %s", project_path)
         return
 
-    project_path.write_text(PROJECT_GODOT_TEMPLATE, encoding="utf-8")
-    logger.info("Wrote project.godot with global shader uniforms")
+    # Replace the hardcoded project name with the pack name
+    project_content = PROJECT_GODOT_TEMPLATE.replace(
+        'config/name="Synty Converted Assets"',
+        f'config/name="{pack_name}"'
+    )
+    project_path.write_text(project_content, encoding="utf-8")
+    logger.info("Wrote project.godot with project name '%s'", pack_name)
 
 
 def write_conversion_log(output_dir: Path, stats: ConversionStats, config: ConversionConfig) -> None:
@@ -974,6 +1074,7 @@ def write_conversion_log(output_dir: Path, stats: ConversionStats, config: Conve
         "Statistics:",
         f"  Materials Parsed: {stats.materials_parsed}",
         f"  Materials Generated: {stats.materials_generated}",
+        f"  Materials Missing: {stats.materials_missing}",
         f"  Textures Copied: {stats.textures_copied}",
         f"  Textures Fallback: {stats.textures_fallback}",
         f"  Textures Missing: {stats.textures_missing}",
@@ -1018,6 +1119,8 @@ def print_summary(stats: ConversionStats) -> None:
     print("=" * 60)
     print(f"  Materials Parsed:    {stats.materials_parsed}")
     print(f"  Materials Generated: {stats.materials_generated}")
+    if stats.materials_missing > 0:
+        print(f"  Materials Missing:   {stats.materials_missing}")
     print(f"  Textures Copied:     {stats.textures_copied}")
     print(f"  Textures Missing:    {stats.textures_missing}")
     print(f"  Shaders Copied:      {stats.shaders_copied}")
@@ -1375,6 +1478,7 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
 
             # Find missing materials - just warn, don't create placeholders
             missing_materials = referenced_materials - existing_materials
+            stats.materials_missing = len(missing_materials)
 
             if missing_materials:
                 logger.warning(
@@ -1390,7 +1494,7 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
 
         # Step 11: Generate project.godot
         logger.info("Generating project.godot...")
-        generate_project_godot(pack_output_dir, config.dry_run)
+        generate_project_godot(pack_output_dir, pack_name, config.dry_run)
 
         # Step 12: Run Godot CLI to convert FBX to .tscn scene files
         if not config.skip_godot_cli:
