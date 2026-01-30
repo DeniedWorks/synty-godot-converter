@@ -484,6 +484,7 @@ TEXTURE_MAP_CRYSTAL: dict[str, str] = {
     # Alternative property names from different packs
     "_MainTex": "base_albedo",
     "_BumpMap": "base_normal",
+    "_BaseMap": "base_albedo",
 }
 
 # Water Shader (Rivers, Lakes, Oceans)
@@ -491,57 +492,46 @@ TEXTURE_MAP_CRYSTAL: dict[str, str] = {
 TEXTURE_MAP_WATER: dict[str, str] = {
     "_Caustics_Flipbook": "caustics_flipbook",
     # Foam textures (auto-enable foam features when present)
-    "_Foam_Noise_Texture": "foam_noise_texture",
-    "_Foam_Texture": "foam_noise_texture",  # Older naming convention
-    "_Foam_Texture1": "foam_noise_texture",  # Goblin War Camp variant
+    "_Foam_Noise_Texture": "noise_texture",
+    "_Foam_Texture": "noise_texture",  # Older naming convention
+    "_Foam_Texture1": "noise_texture",  # Goblin War Camp variant
     "_FoamMask": "noise_texture",  # Foam masking (Goblin War Camp)
     "_Noise_Texture": "noise_texture",  # Global foam noise texture
-    "_Normal_Map": "water_normal_texture",  # Alternative normal map name
-    "_Normal_Texture": "water_normal_texture",
+    "_Normal_Map": "normal_texture",  # Alternative normal map name
+    "_Normal_Texture": "normal_texture",
     "_Scrolling_Texture": "scrolling_texture",
     "_Shore_Foam_Noise_Texture": "shore_foam_noise_texture",
-    "_Water_Normal_Texture": "water_normal_texture",  # Water normal texture
-    "_WaterNormal": "water_normal_texture",  # Older naming for water normal
-    "_WaterNormal1": "water_normal_texture",  # Secondary normal (Goblin War Camp)
-    "_WaterNormal2": "water_normal_texture",  # Tertiary normal (Goblin War Camp)
+    "_Water_Normal_Texture": "normal_texture",  # Water normal texture
+    "_WaterNormal": "normal_texture",  # Older naming for water normal
+    "_WaterNormal1": "normal_texture",  # Secondary normal (Goblin War Camp)
+    "_WaterNormal2": "normal_texture",  # Tertiary normal (Goblin War Camp)
     # Ripple normal maps (Goblin War Camp, Dwarven Dungeon)
-    "_RipplesNormal": "water_normal_texture",
-    "_RipplesNormal2": "water_normal_texture",
+    "_RipplesNormal": "normal_texture",
+    "_RipplesNormal2": "normal_texture",
     # Wave mask textures (Goblin War Camp)
     "_WaveMask": "noise_texture",
     "_WaveMaskTuff": "noise_texture",
     "_WaveNoise": "noise_texture",
     # Shore wave foam (separate from shore foam)
-    "_Shore_Wave_Foam_Noise_Texture": "shore_wave_foam_noise_texture",
+    "_Shore_Wave_Foam_Noise_Texture": "shore_foam_noise_texture",
     # Water noise/distortion textures
-    "_Water_Noise_Texture": "water_noise_texture",
+    "_Water_Noise_Texture": "noise_texture",
     # Standard Unity texture fallbacks
-    "_MainTex": "water_normal_texture",
-    "_BumpMap": "water_normal_texture",
+    "_MainTex": "normal_texture",
+    "_BumpMap": "normal_texture",
+    "_BaseMap": "normal_texture",
 }
 
 # Particles Shader (Effects, Fog)
 TEXTURE_MAP_PARTICLES: dict[str, str] = {
     "_Albedo_Map": "albedo_map",
     "_MainTex": "albedo_map",  # Standard Unity particle texture
-    "_EmissionMap": "emission_texture",  # Consistent with polygon shader
+    "_BaseMap": "albedo_map",
 }
 
 # Skydome Shader (Sky Gradient)
-# Skydome typically uses no textures - it's a procedural gradient shader.
-# Some packs use cubemap textures for skybox instead of procedural.
-TEXTURE_MAP_SKYDOME: dict[str, str] = {
-    # Skydome uses procedural gradient based on _Top_Color and _Bottom_Color
-    # Cubemap textures for SciFi/special skyboxes
-    "_FrontTex": "front_texture",
-    "_BackTex": "back_texture",
-    "_LeftTex": "left_texture",
-    "_RightTex": "right_texture",
-    "_UpTex": "up_texture",
-    "_DownTex": "down_texture",
-    # Standard Unity skybox
-    "_MainTex": "main_texture",
-}
+# Skydome is a procedural gradient shader with no texture uniforms.
+TEXTURE_MAP_SKYDOME: dict[str, str] = {}
 
 # Clouds Shader (Volumetric Clouds)
 # Clouds typically use procedural noise generation, no textures needed.
@@ -558,6 +548,50 @@ TEXTURE_MAPS: dict[str, dict[str, str]] = {
     "particles.gdshader": TEXTURE_MAP_PARTICLES,
     "skydome.gdshader": TEXTURE_MAP_SKYDOME,
     "clouds.gdshader": TEXTURE_MAP_CLOUDS,
+}
+
+# =============================================================================
+# SHADER-SPECIFIC PROPERTIES (for fallback validation)
+# =============================================================================
+# Defines which properties are unique to each specialized shader.
+# Used to validate that a material actually needs a specialized shader,
+# rather than just matching by name pattern alone.
+#
+# If a material matches a specialized shader by name pattern but has none
+# of that shader's specific properties, it falls back to polygon.gdshader.
+# =============================================================================
+
+SHADER_SPECIFIC_PROPERTIES: dict[str, dict[str, set[str]]] = {
+    "foliage.gdshader": {
+        "textures": {"_Leaf_Texture", "_Trunk_Texture", "_Leaf_Normal", "_Trunk_Normal", "_Breeze_Noise_Map", "_Leaf_Ambient_Occlusion", "_Trunk_Ambient_Occlusion"},
+        "floats": {"_Breeze_Strength", "_Light_Wind_Strength", "_Strong_Wind_Strength", "_Leaf_Smoothness", "_LeafSmoothness", "_Trunk_Smoothness", "_TrunkSmoothness", "_Leaf_Metallic", "_Trunk_Metallic"},
+        "colors": {"_Leaf_Base_Color", "_Trunk_Base_Color"},
+    },
+    "crystal.gdshader": {
+        "textures": {"_Refraction_Height", "_Refraction_Texture", "_Top_Albedo", "_Base_Albedo", "_Top_Normal", "_Base_Normal"},
+        "floats": {"_Fresnel_Power", "_Refraction_Strength", "_Deep_Depth", "_Shallow_Depth", "_Enable_Fresnel", "_Enable_Refraction"},
+        "colors": {"_Deep_Color", "_Shallow_Color", "_Fresnel_Color", "_Refraction_Color"},
+    },
+    "water.gdshader": {
+        "textures": {"_Caustics_Flipbook", "_Foam_Noise_Texture", "_Shore_Foam_Noise_Texture", "_Scrolling_Texture", "_Water_Normal_Texture", "_Foam_Texture"},
+        "floats": {"_Maximum_Depth", "_Shore_Wave_Speed", "_Ocean_Wave_Height", "_Shore_Foam_Intensity", "_Caustics_Intensity", "_Base_Opacity", "_Shallows_Opacity"},
+        "colors": {"_Shallow_Color", "_Deep_Color", "_Very_Deep_Color", "_Foam_Color", "_Caustics_Color"},
+    },
+    "particles.gdshader": {
+        "textures": set(),
+        "floats": {"_Soft_Power", "_Soft_Distance", "_Camera_Fade_Near", "_Camera_Fade_Far", "_View_Edge_Power", "_Fog_Density"},
+        "colors": {"_Fog_Color"},
+    },
+    "skydome.gdshader": {
+        "textures": set(),
+        "floats": {"_Falloff", "_Offset", "_Distance"},
+        "colors": {"_Top_Color", "_Bottom_Color"},
+    },
+    "clouds.gdshader": {
+        "textures": set(),
+        "floats": {"_Light_Intensity", "_Scattering_Multiplier", "_Cloud_Speed", "_Cloud_Strength", "_CloudCoverage"},
+        "colors": {"_Scattering_Color", "_Aurora_Color_01", "_Aurora_Color_02"},
+    },
 }
 
 # =============================================================================
@@ -1755,6 +1789,48 @@ def _apply_defaults(material: MappedMaterial) -> MappedMaterial:
     return material
 
 
+def validate_shader_properties(shader_file: str, material: UnityMaterial) -> bool:
+    """Check if material has properties that justify using this specialized shader.
+
+    When a material matches a specialized shader via name pattern matching,
+    this function verifies the material actually has properties specific to
+    that shader. This prevents false positives where a material named
+    "Water_Bucket_Prop" (a metal bucket, not water) gets the water shader.
+
+    Args:
+        shader_file: The shader filename to validate (e.g., "water.gdshader").
+        material: The Unity material to check properties of.
+
+    Returns:
+        True if at least one shader-specific property is present.
+        True for polygon.gdshader (always valid as fallback).
+        True for unknown shaders (don't block shaders not in the validation dict).
+    """
+    if shader_file == "polygon.gdshader":
+        return True
+
+    specific = SHADER_SPECIFIC_PROPERTIES.get(shader_file)
+    if not specific:
+        return True  # Unknown shader, don't block it
+
+    # Check textures
+    for tex_name in material.tex_envs:
+        if tex_name in specific["textures"]:
+            return True
+
+    # Check floats
+    for float_name in material.floats:
+        if float_name in specific["floats"]:
+            return True
+
+    # Check colors
+    for color_name in material.colors:
+        if color_name in specific["colors"]:
+            return True
+
+    return False
+
+
 # =============================================================================
 # MAIN CONVERSION FUNCTION
 # =============================================================================
@@ -1850,6 +1926,16 @@ def map_material(
             floats=material.floats,
             colors=color_tuples,
         )
+
+    # Validate shader-specific properties - fall back to polygon if material
+    # doesn't have properties that justify using the specialized shader
+    if not validate_shader_properties(shader_file, material):
+        logger.info(
+            "Shader %s detected for '%s' via name pattern, but no shader-specific "
+            "properties found. Falling back to polygon.gdshader",
+            shader_file, material.name
+        )
+        shader_file = DEFAULT_SHADER
 
     # Step 2: Get the appropriate property maps for this shader
     texture_map = TEXTURE_MAPS.get(shader_file, {})

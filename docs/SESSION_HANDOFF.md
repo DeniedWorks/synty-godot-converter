@@ -267,14 +267,15 @@ output/
    - `PolygonFantasyKingdom` - has crystals
    - `PolygonSciFi` - has emission, holograms
 
-3. **BUG TO FIX - Shader Detection Bug:**
-   - SM_Plant materials incorrectly get `foliage.gdshader` instead of `polygon.gdshader`
-   - The `uses_custom_shader=False` check should always return `polygon.gdshader`
-   - But name pattern matching is overriding this check
-   - **Fix needed in:**
-     - `shader_mapping.py` - `determine_shader()` function (lines 1830-2012)
-     - `converter.py` - `build_shader_cache()` (lines 1057-1112)
-   - Root cause: Name pattern scoring runs even when `uses_custom_shader=False`
+3. **BUG FIXED - Shader Texture Mapping Gaps (2026-01-30):**
+   - SM_Plant materials were getting correct shader (foliage.gdshader) but textures didn't display
+   - Root cause: Common Unity properties (`_MainTex`, `_BaseMap`, `_BumpMap`) weren't mapped for shader-specific uniforms
+   - **Fixes applied to `shader_mapping.py`:**
+     - FOLIAGE: Added `_MainTex`→`leaf_color`, `_BaseMap`→`leaf_color`, `_BumpMap`→`leaf_normal`, `_EmissionMap`→`emissive_mask`
+     - CRYSTAL: Added `_BaseMap`→`base_albedo`
+     - WATER: Fixed 11 mappings using wrong uniform names (`water_normal_texture`→`normal_texture`, `foam_noise_texture`→`noise_texture`)
+     - PARTICLES: Removed invalid `_EmissionMap` mapping, added `_BaseMap`→`albedo_map`
+     - SKYDOME: Cleared to empty dict (shader is procedural, no texture uniforms)
 
 ---
 
@@ -284,7 +285,7 @@ output/
 |------|---------|
 | `converter.py` | Pack-based output structure, shader cache with LOD inheritance, temp file cleanup |
 | `unity_package.py` | Added `texture_guid_to_path` field, `_extract_textures_to_temp()` function |
-| `shader_mapping.py` | New `determine_shader()`, `detect_shader_from_name()` functions, expanded texture mappings |
+| `shader_mapping.py` | New `determine_shader()`, `detect_shader_from_name()` functions, expanded texture mappings, fixed shader-specific TEXTURE_MAP_* dictionaries |
 | `tres_generator.py` | Expanded `AUTO_ENABLE_RULES` from 6 to 23 rules |
 
 ---
