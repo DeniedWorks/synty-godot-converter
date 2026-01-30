@@ -1176,35 +1176,31 @@ def generate_project_godot(
     output_dir: Path,
     pack_name: str,
     dry_run: bool,
-    existing_project: bool = False,
 ) -> None:
     """Write or update project.godot with global shader uniforms.
 
-    When existing_project is False (default), creates a new project.godot file
-    with the pack name and all shader uniforms from the template.
+    If project.godot already exists, merges in any missing shader uniforms
+    from the template while preserving all other settings (project name, etc.).
 
-    When existing_project is True, reads the existing project.godot and merges
-    in any missing shader uniforms from the template, preserving all other
-    settings (project name, etc.).
+    If project.godot does not exist, creates a new file with the pack name
+    and all shader uniforms from the template.
 
     Args:
         output_dir: Output directory where project.godot will be written/updated.
         pack_name: Name of the pack to use as the project name (only used when
-            existing_project is False).
+            creating a new file).
         dry_run: If True, only log what would be written.
-        existing_project: If True, merge shader uniforms into existing file
-            instead of overwriting.
     """
     project_path = output_dir / "project.godot"
 
     if dry_run:
-        if existing_project and project_path.exists():
+        if project_path.exists():
             logger.info("[DRY RUN] Would merge shader uniforms into: %s", project_path)
         else:
             logger.info("[DRY RUN] Would write project.godot to: %s", project_path)
         return
 
-    if existing_project and project_path.exists():
+    if project_path.exists():
         # Read existing content
         existing_content = project_path.read_text(encoding="utf-8")
 
@@ -1222,7 +1218,7 @@ def generate_project_godot(
         project_path.write_text(updated_content, encoding="utf-8")
         logger.info("Updated project.godot with merged shader uniforms")
     else:
-        # Original behavior: write new project.godot with pack name
+        # Create new project.godot with pack name
         project_content = PROJECT_GODOT_TEMPLATE.replace(
             'config/name="Synty Converted Assets"',
             f'config/name="{pack_name}"'
@@ -1437,9 +1433,6 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
     """
     stats = ConversionStats()
 
-    # Detect if output_dir is an existing Godot project
-    existing_project = (config.output_dir / "project.godot").exists()
-
     # Extract pack name from source_files parent directory
     # e.g., C:\SyntyComplete\PolygonNature\SourceFiles -> pack_name = "PolygonNature"
     raw_pack_name = config.source_files.parent.name
@@ -1448,24 +1441,13 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
     if pack_name != raw_pack_name:
         logger.warning("Pack name sanitized: '%s' -> '%s'", raw_pack_name, pack_name)
 
-    # Determine output structure based on whether we're adding to an existing project
-    if existing_project:
-        # Adding to existing Godot project:
-        # - Assets go in pack subfolder: output_dir/pack_name/
-        # - Shaders go at project root: output_dir/shaders/
-        # - project.godot already exists, don't overwrite
-        pack_output_dir = config.output_dir / pack_name
-        shaders_dir = config.output_dir / "shaders"
-        project_dir = config.output_dir  # For Godot CLI
-        logger.info("Detected existing Godot project at: %s", config.output_dir)
-    else:
-        # Creating new standalone project:
-        # - Pack folder becomes the project root: output_dir/pack_name/
-        # - Shaders inside pack folder: output_dir/pack_name/shaders/
-        # - Generate project.godot in pack folder
-        pack_output_dir = config.output_dir / pack_name
-        shaders_dir = pack_output_dir / "shaders"
-        project_dir = pack_output_dir  # For Godot CLI
+    # Consistent output structure:
+    # - project.godot at output_dir root (create new or merge uniforms)
+    # - shaders/ at output_dir root (shared across all packs)
+    # - PackName/ subfolder for pack-specific assets
+    pack_output_dir = config.output_dir / pack_name
+    shaders_dir = config.output_dir / "shaders"
+    project_dir = config.output_dir
 
     # Step 1: Validate inputs (already done in parse_args, but double-check)
     logger.info("Starting conversion pipeline...")
@@ -1473,7 +1455,6 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
     logger.info("  Unity Package: %s", config.unity_package)
     logger.info("  Source Files: %s", config.source_files)
     logger.info("  Pack Output: %s", pack_output_dir)
-    logger.info("  Existing Project: %s", existing_project)
     logger.info("  Shaders Dir: %s", shaders_dir)
     logger.info("  Project Dir: %s", project_dir)
 
@@ -1697,12 +1678,8 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
             logger.info("No MaterialList data available, skipping mesh-material mapping")
 
         # Step 11: Generate or update project.godot
-        if existing_project:
-            logger.info("Merging shader uniforms into existing project.godot...")
-            generate_project_godot(project_dir, pack_name, config.dry_run, existing_project=True)
-        else:
-            logger.info("Generating project.godot...")
-            generate_project_godot(project_dir, pack_name, config.dry_run, existing_project=False)
+        logger.info("Generating/updating project.godot...")
+        generate_project_godot(project_dir, pack_name, config.dry_run)
 
         # Step 12: Run Godot CLI to convert FBX to .tscn scene files
         if not config.skip_godot_cli:
