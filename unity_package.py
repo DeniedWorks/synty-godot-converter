@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import tarfile
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
@@ -71,12 +72,14 @@ class GuidMap:
     guid_to_pathname: dict[str, str] = field(default_factory=dict)
     guid_to_content: dict[str, bytes] = field(default_factory=dict)
     texture_guid_to_name: dict[str, str] = field(default_factory=dict)
+    texture_guid_to_path: dict[str, Path] = field(default_factory=dict)
 
     def __repr__(self) -> str:
         return (
             f"GuidMap(pathnames={len(self.guid_to_pathname)}, "
             f"contents={len(self.guid_to_content)}, "
-            f"textures={len(self.texture_guid_to_name)})"
+            f"textures={len(self.texture_guid_to_name)}, "
+            f"texture_paths={len(self.texture_guid_to_path)})"
         )
 
 
@@ -144,10 +147,20 @@ def extract_unitypackage(package_path: Path) -> GuidMap:
     guid_to_content = _extract_material_contents(guid_data, guid_to_pathname)
     logger.info("Extracted content for %d material files", len(guid_to_content))
 
+    # Extract textures to temp files
+    temp_dir = Path(tempfile.mkdtemp(prefix="synty_textures_"))
+    texture_guid_to_path = _extract_textures_to_temp(guid_data, guid_to_pathname, temp_dir)
+    logger.info(
+        "Extracted %d textures to temp directory: %s",
+        len(texture_guid_to_path),
+        temp_dir,
+    )
+
     return GuidMap(
         guid_to_pathname=guid_to_pathname,
         guid_to_content=guid_to_content,
         texture_guid_to_name=texture_guid_to_name,
+        texture_guid_to_path=texture_guid_to_path,
     )
 
 
@@ -371,6 +384,45 @@ def _extract_material_contents(
     return guid_to_content
 
 
+def _extract_textures_to_temp(
+    guid_data: dict[str, dict[str, bytes]],
+    guid_to_pathname: dict[str, str],
+    temp_dir: Path,
+) -> dict[str, Path]:
+    """Extract texture assets to temp files.
+
+    Extracts the actual texture file content from the Unity package and writes
+    each texture to a temp file. This allows the converter to use textures
+    directly from the package instead of searching SourceFiles.
+
+    Args:
+        guid_data: Parsed tar structure from _parse_tar_structure, mapping
+            GUID to {filename: content}.
+        guid_to_pathname: GUID to pathname mapping for identifying texture files.
+        temp_dir: Directory to write temp texture files to.
+
+    Returns:
+        Dictionary mapping texture GUID to the Path of the extracted temp file.
+    """
+    texture_guid_to_path: dict[str, Path] = {}
+
+    for guid, pathname in guid_to_pathname.items():
+        ext = PurePosixPath(pathname).suffix.lower()
+        if ext not in TEXTURE_EXTENSIONS:
+            continue
+
+        files = guid_data.get(guid, {})
+        if "asset" not in files:
+            continue
+
+        # Write to temp file with original extension
+        temp_file = temp_dir / f"{guid}{ext}"
+        temp_file.write_bytes(files["asset"])
+        texture_guid_to_path[guid] = temp_file
+
+    return texture_guid_to_path
+
+
 def get_material_guids(guid_map: GuidMap) -> list[str]:
     """Get all GUIDs that correspond to .mat files.
 
@@ -468,6 +520,7 @@ def print_guid_map_summary(guid_map: GuidMap) -> None:
     print(f"Total assets:     {len(guid_map.guid_to_pathname)}")
     print(f"Material files:   {len(guid_map.guid_to_content)}")
     print(f"Texture files:    {len(guid_map.texture_guid_to_name)}")
+    print(f"Texture temps:    {len(guid_map.texture_guid_to_path)}")
 
     # Count by extension
     extensions: dict[str, int] = {}

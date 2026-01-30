@@ -376,9 +376,11 @@ TEXTURE_MAP_FOLIAGE: dict[str, str] = {
     "_Trunk_Normal": "trunk_normal",
     "_Leaf_Ambient_Occlusion": "leaf_ao",
     "_Trunk_Ambient_Occlusion": "trunk_ao",
-    # Legacy names (2021 and earlier packs used different naming)
-    "_Leaves_NoiseTexture": "leaf_color",
-    "_Tree_NoiseTexture": "trunk_color",
+    # Emissive masks (auto-enables emissive features when present)
+    "_Emissive_Mask": "emissive_mask",
+    "_Emissive_2_Mask": "emissive_2_mask",
+    "_Emissive_Pulse_Map": "emissive_pulse_mask",
+    "_Trunk_Emissive_Mask": "trunk_emissive_mask",
 }
 
 # Polygon Shader (Props, Terrain, Characters, Triplanar)
@@ -437,6 +439,16 @@ TEXTURE_MAP_POLYGON: dict[str, str] = {
     "_LED_Mask_01": "led_mask",
     # Cloth/Sail wind animation
     "_Cloth_Mask": "cloth_mask",
+    # Overlay texture (auto-enables overlay feature when present)
+    "_Overlay_Texture": "overlay_texture",
+    # Triplanar normal and emission textures (auto-enable triplanar features)
+    "_Triplanar_Emission_Texture": "triplanar_emission_texture",
+    "_Triplanar_Normal_Texture_Bottom": "triplanar_normal_bottom",
+    "_Triplanar_Normal_Texture_Side": "triplanar_normal_side",
+    "_Triplanar_Normal_Texture_Top": "triplanar_normal_top",
+    # Legacy/alternative names for moss overlay
+    "_Moss": "overlay_texture",
+    "_MossTexture": "overlay_texture",
 }
 
 # Crystal Shader (Crystals, Glass, Gems)
@@ -444,15 +456,27 @@ TEXTURE_MAP_POLYGON: dict[str, str] = {
 TEXTURE_MAP_CRYSTAL: dict[str, str] = {
     "_Base_Albedo": "base_albedo",
     "_Base_Normal": "base_normal",
-    "_Refraction_Texture": "refraction_texture",
     "_Refraction_Height": "refraction_height",
+    "_Refraction_Texture": "refraction_texture",
+    # Top textures (auto-enable top layer feature when present)
+    "_Top_Albedo": "top_albedo",
+    "_Top_Normal": "top_normal",
 }
 
 # Water Shader (Rivers, Lakes, Oceans)
 # Water uses normal maps for surface ripples and caustics for underwater light.
 TEXTURE_MAP_WATER: dict[str, str] = {
-    "_Normal_Texture": "normal_texture",
     "_Caustics_Flipbook": "caustics_flipbook",
+    # Foam textures (auto-enable foam features when present)
+    "_Foam_Noise_Texture": "foam_noise_texture",
+    "_Foam_Texture": "foam_noise_texture",  # Older naming convention
+    "_Noise_Texture": "noise_texture",  # Global foam noise texture
+    "_Normal_Map": "water_normal_texture",  # Alternative normal map name
+    "_Normal_Texture": "water_normal_texture",
+    "_Scrolling_Texture": "scrolling_texture",
+    "_Shore_Foam_Noise_Texture": "shore_foam_noise_texture",
+    "_Water_Normal_Texture": "water_normal_texture",  # Water normal texture
+    "_WaterNormal": "water_normal_texture",  # Older naming for water normal
 }
 
 # Particles Shader (Effects, Fog)
@@ -1579,7 +1603,8 @@ def _apply_defaults(material: MappedMaterial) -> MappedMaterial:
 
 def map_material(
     material: UnityMaterial,
-    texture_guid_map: dict[str, str]
+    texture_guid_map: dict[str, str],
+    override_shader: str | None = None,
 ) -> MappedMaterial:
     """Convert a Unity material to Godot format.
 
@@ -1587,8 +1612,9 @@ def map_material(
     complete property mapping from Unity to Godot:
 
     **Step 1: Shader Detection**
-    Calls detect_shader_type() to determine which Godot shader to use.
-    Uses GUID lookup, name patterns, and property analysis.
+    If override_shader is provided, uses that directly (from shader cache).
+    Otherwise calls detect_shader_type() to determine which Godot shader to use
+    via GUID lookup, name patterns, and property analysis.
 
     **Step 2: Property Map Selection**
     Selects the appropriate TEXTURE_MAP, FLOAT_MAP, and COLOR_MAP
@@ -1614,6 +1640,9 @@ def map_material(
         material: Parsed Unity material from unity_parser module.
         texture_guid_map: Maps texture GUIDs to filename stems (no extension).
             Typically from UnityPackageExtract.texture_guid_to_name.
+        override_shader: Optional shader filename to use instead of detection.
+            When provided, skips all shader detection logic. Used by the
+            converter's shader cache system for MaterialList-based detection.
 
     Returns:
         MappedMaterial ready for .tres file generation by material_writer.
@@ -1645,15 +1674,24 @@ def map_material(
         The material object must have a tex_envs attribute (from unity_parser)
         that contains the full texture references with GUIDs.
     """
-    # Step 1: Detect shader type (pass floats and colors for property-based detection)
-    # Convert Color objects to tuples for the detection function
-    color_tuples = {name: color.as_tuple() for name, color in material.colors.items()}
-    shader_file = detect_shader_type(
-        material.shader_guid,
-        material.name,
-        floats=material.floats,
-        colors=color_tuples,
-    )
+    # Step 1: Detect shader type
+    # If override_shader provided, use it directly (from shader cache)
+    if override_shader:
+        shader_file = override_shader
+        logger.debug(
+            "Using override shader %s for material %s",
+            shader_file, material.name
+        )
+    else:
+        # Fall back to full detection (pass floats and colors for property-based detection)
+        # Convert Color objects to tuples for the detection function
+        color_tuples = {name: color.as_tuple() for name, color in material.colors.items()}
+        shader_file = detect_shader_type(
+            material.shader_guid,
+            material.name,
+            floats=material.floats,
+            colors=color_tuples,
+        )
 
     # Step 2: Get the appropriate property maps for this shader
     texture_map = TEXTURE_MAPS.get(shader_file, {})
@@ -1786,6 +1824,111 @@ def get_color_property_mapping(shader_file: str) -> dict[str, str]:
         Empty dict if shader is unknown.
     """
     return COLOR_MAPS.get(shader_file, {})
+
+
+# =============================================================================
+# NEW SIMPLIFIED SHADER DETECTION (MaterialList-based)
+# =============================================================================
+# These functions use the simpler detection flow based on MaterialList.txt:
+# 1. If uses_custom_shader=False -> polygon.gdshader (immediate)
+# 2. If uses_custom_shader=True -> name pattern matching -> shader or polygon
+# 3. LOD inheritance: LOD0's shader decision applies to all LODs
+
+
+def detect_shader_from_name(material_name: str) -> str | None:
+    """Detect shader type using only name pattern matching.
+
+    Used when uses_custom_shader=True in MaterialList.
+    Returns shader filename or None if no match (signals logging needed).
+
+    This is a simplified detection method that only uses material name patterns,
+    without GUID lookup or property analysis. It's designed for use with
+    MaterialList.txt which tells us whether a material uses a custom shader.
+
+    Args:
+        material_name: The material name to analyze.
+
+    Returns:
+        Shader filename if a strong match is found (score >= 20),
+        None if no strong match (caller should log for manual review).
+
+    Example:
+        >>> detect_shader_from_name("Crystal_Mat_01")
+        'crystal.gdshader'
+        >>> detect_shader_from_name("Water_River_01")
+        'water.gdshader'
+        >>> detect_shader_from_name("SomeUnknownMaterial")
+        None
+    """
+    shader_scores: dict[str, int] = {}
+
+    for pattern, shader, score in SHADER_NAME_PATTERNS_SCORED:
+        if pattern.search(material_name):
+            shader_scores[shader] = shader_scores.get(shader, 0) + score
+
+    if shader_scores:
+        best_shader = max(shader_scores, key=shader_scores.get)
+        best_score = shader_scores[best_shader]
+
+        if best_score >= 20:  # Minimum threshold
+            logger.debug(
+                "Shader detected via name pattern -> %s (score: %d) for material %s",
+                best_shader, best_score, material_name
+            )
+            return best_shader
+
+    # No match - return None to signal logging needed
+    return None
+
+
+def determine_shader(
+    material_name: str,
+    uses_custom_shader: bool,
+) -> tuple[str, bool]:
+    """Determine shader for a material using the simplified MaterialList-based flow.
+
+    This is the main entry point for the new detection system. The logic is:
+    1. If not a custom shader (uses_custom_shader=False), always use polygon
+    2. If custom shader, try name pattern matching
+    3. If no match, default to polygon but signal for logging
+
+    Args:
+        material_name: The material name.
+        uses_custom_shader: From MaterialList.txt - True if marked "(Uses custom shader)".
+
+    Returns:
+        Tuple of (shader_filename, matched) where:
+        - shader_filename: The Godot shader to use
+        - matched: False if the material should be logged for manual review
+                   (used to track unmatched custom shader materials)
+
+    Example:
+        >>> determine_shader("Ground_Mat", uses_custom_shader=False)
+        ('polygon.gdshader', True)
+        >>> determine_shader("Crystal_Mat_01", uses_custom_shader=True)
+        ('crystal.gdshader', True)
+        >>> determine_shader("UnknownMat", uses_custom_shader=True)
+        ('polygon.gdshader', False)  # Needs manual review
+    """
+    # If not a custom shader, always use polygon
+    if not uses_custom_shader:
+        logger.debug(
+            "Material %s: uses_custom_shader=False -> %s",
+            material_name, DEFAULT_SHADER
+        )
+        return DEFAULT_SHADER, True
+
+    # Try name pattern matching
+    shader = detect_shader_from_name(material_name)
+    if shader:
+        return shader, True
+
+    # No match - default to polygon but signal for logging
+    logger.debug(
+        "Material %s: custom shader, no name pattern match -> %s (unmatched)",
+        material_name, DEFAULT_SHADER
+    )
+    return DEFAULT_SHADER, False
 
 
 def create_placeholder_material(material_name: str) -> MappedMaterial:

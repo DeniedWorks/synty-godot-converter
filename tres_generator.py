@@ -69,18 +69,63 @@ logger = logging.getLogger(__name__)
 #      we automatically set the corresponding bool parameter to true
 #   3. This saves users from manually enabling features after assigning textures
 AUTO_ENABLE_RULES: dict[str, str] = {
-    "leaf_normal": "enable_leaf_normal",        # Foliage leaf normal maps
-    "trunk_normal": "enable_trunk_normal",      # Foliage trunk normal maps
-    "normal_texture": "enable_normal_texture",  # General normal mapping
-    "emission_texture": "enable_emission_texture",  # Emission/glow effects
-    "ao_texture": "enable_ambient_occlusion",   # Ambient occlusion maps
+    # -------------------------------------------------------------------------
+    # Polygon Shader
+    # -------------------------------------------------------------------------
+    "normal_texture": "enable_normal_texture",       # General normal mapping
+    "emission_texture": "enable_emission_texture",   # Emission/glow effects
+    "ao_texture": "enable_ambient_occlusion",        # Ambient occlusion maps
+    "overlay_texture": "enable_overlay_texture",     # Overlay texture blending
+    # Triplanar normal maps (all enable the same feature)
+    "triplanar_normal_top": "enable_triplanar_normals",
+    "triplanar_normal_side": "enable_triplanar_normals",
+    "triplanar_normal_bottom": "enable_triplanar_normals",
+    # Triplanar emission
+    "triplanar_emission_texture": "enable_triplanar_emission",
+
+    # -------------------------------------------------------------------------
+    # Foliage Shader
+    # -------------------------------------------------------------------------
+    "leaf_normal": "enable_leaf_normal",             # Foliage leaf normal maps
+    "trunk_normal": "enable_trunk_normal",           # Foliage trunk normal maps
+    # Emission masks (all enable base emission)
+    "emissive_mask": "enable_emission",
+    "emissive_2_mask": "enable_emission",
+    "trunk_emissive_mask": "enable_emission",
+    # Pulse effect
+    "emissive_pulse_mask": "enable_pulse",
+
+    # -------------------------------------------------------------------------
+    # Crystal Shader
+    # -------------------------------------------------------------------------
+    "top_albedo": "enable_top_projection",           # Top projection textures
+    "top_normal": "enable_top_projection",
+    "refraction_texture": "enable_refraction",       # Crystal refraction effect
+
+    # -------------------------------------------------------------------------
+    # Water Shader
+    # -------------------------------------------------------------------------
+    "water_normal_texture": "enable_normals",        # Water normal mapping
+    "shore_foam_noise_texture": "enable_shore_foam", # Shore foam effect
+    "foam_noise_texture": "enable_global_foam",      # Global foam effect
+    "noise_texture": "enable_global_foam",           # Global foam (alternative name)
+    "scrolling_texture": "enable_top_scrolling_texture",  # Scrolling surface texture
+    "caustics_flipbook": "enable_caustics",          # Underwater caustics
 }
 
 # Prefix patterns that enable triplanar projection.
 # If any texture parameter starts with these prefixes, triplanar is enabled.
 # Triplanar projection maps textures based on world normals rather than UVs,
 # useful for terrain and rock meshes that lack proper UV mapping.
-TRIPLANAR_PREFIXES: tuple[str, ...] = ("triplanar_texture_",)
+#
+# Note: Specific triplanar normal/emission textures are handled in AUTO_ENABLE_RULES
+# above (e.g., triplanar_normal_top -> enable_triplanar_normals). These prefixes
+# handle the general triplanar texture projection enable.
+TRIPLANAR_PREFIXES: tuple[str, ...] = (
+    "triplanar_texture_",      # Base triplanar textures (albedo, etc.)
+    "triplanar_normal_",       # Triplanar normal maps
+    "triplanar_emission_",     # Triplanar emission textures
+)
 
 
 # =============================================================================

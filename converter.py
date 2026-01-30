@@ -19,13 +19,16 @@ Pipeline Steps:
     2. Create output directory structure
     3. Extract Unity package
     4. Parse all .mat files
-    5. Detect shaders and map properties
+    4.5. Parse MaterialList.txt early (for shader detection)
+    4.6. Build shader cache with LOD inheritance
+    5. Detect shaders and map properties (using shader cache)
     6. Generate .tres files
     7. Copy .gdshader files
     8. Copy required textures
-    9. Parse MaterialList.txt (if exists)
-    10. Generate mesh_material_mapping.json
-    11. Generate project.godot with global shader uniforms
+    8.5. Copy FBX files
+    9. Generate mesh_material_mapping.json (uses cached prefabs)
+    10. Generate project.godot with global shader uniforms
+    11. Run Godot CLI to convert FBX to .tscn (unless --skip-godot-cli)
     12. Print conversion summary
 """
 
@@ -33,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
 import shutil
 import subprocess
 import sys
@@ -44,9 +48,14 @@ from pathlib import Path
 # Local imports
 from unity_package import extract_unitypackage, GuidMap, get_material_guids, get_material_name
 from unity_parser import parse_material_bytes, UnityMaterial
-from shader_mapping import map_material, detect_shader_type, MappedMaterial
+from shader_mapping import map_material, detect_shader_type, determine_shader, MappedMaterial
 from tres_generator import generate_tres, write_tres_file, sanitize_filename
-from material_list import parse_material_list, generate_mesh_material_mapping_json
+from material_list import (
+    parse_material_list,
+    generate_mesh_material_mapping_json,
+    get_custom_shader_materials,
+    PrefabMaterials,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -460,16 +469,36 @@ def find_texture_file(textures_dir: Path, texture_name: str) -> Path | None:
             base_name = texture_name[:-len(ext)]
             break
 
-    # Try each extension
-    for ext in TEXTURE_EXTENSIONS:
-        texture_path = textures_dir / f"{base_name}{ext}"
-        if texture_path.exists():
-            return texture_path
+    # Build list of name variations to try
+    # Synty SourceFiles often have "_Texture" inserted in names
+    # e.g., Unity: "PolygonSamuraiEmpire_01_A" -> SourceFiles: "PolygonSamuraiEmpire_Texture_01_A"
+    name_variations = [base_name]
+
+    # Try inserting "_Texture" before numbered suffixes like "_01_A", "_02_B", etc.
+    match = re.match(r'^(.+?)(_\d+_[A-Za-z]+(?:_\w+)?)$', base_name)
+    if match:
+        prefix, suffix = match.groups()
+        name_variations.append(f"{prefix}_Texture{suffix}")
+
+    # Also try just appending "_Texture" variations
+    if "_Texture" not in base_name:
+        name_variations.append(base_name.replace("_01", "_Texture_01"))
+        name_variations.append(base_name.replace("_02", "_Texture_02"))
+        name_variations.append(base_name.replace("_03", "_Texture_03"))
+        name_variations.append(base_name.replace("_04", "_Texture_04"))
+
+    # Try each name variation with each extension
+    for name in name_variations:
+        for ext in TEXTURE_EXTENSIONS:
+            texture_path = textures_dir / f"{name}{ext}"
+            if texture_path.exists():
+                return texture_path
 
     # Try recursive search if not found in root
-    for ext in TEXTURE_EXTENSIONS:
-        for texture_path in textures_dir.rglob(f"{base_name}{ext}"):
-            return texture_path
+    for name in name_variations:
+        for ext in TEXTURE_EXTENSIONS:
+            for texture_path in textures_dir.rglob(f"{name}{ext}"):
+                return texture_path
 
     return None
 
@@ -480,12 +509,19 @@ def copy_textures(
     required: set[str],
     dry_run: bool,
     fallback_texture: Path | None = None,
+    texture_guid_to_path: dict[str, Path] | None = None,
+    texture_name_to_guid: dict[str, str] | None = None,
 ) -> tuple[int, int, int]:
     """Copy required texture files from SourceFiles/Textures to output/textures/.
 
     Iterates through the set of required texture names, finds each one in the
     source directory (using find_texture_file), and copies it to the output.
     Original file extensions are preserved.
+
+    When texture_guid_to_path and texture_name_to_guid are provided, textures
+    are first looked up by GUID and copied from the temp files extracted from
+    the .unitypackage. This is preferred over SourceFiles as it ensures the
+    exact texture referenced by the material is used.
 
     When a texture is not found and a fallback texture is provided, the fallback
     is copied with the missing texture's name. This ensures materials referencing
@@ -503,6 +539,11 @@ def copy_textures(
         fallback_texture: Optional path to a fallback texture (typically the pack's
             main Texture_01.png atlas). When provided, missing textures will be
             substituted with copies of this fallback.
+        texture_guid_to_path: Optional mapping of texture GUID to temp file path.
+            When provided along with texture_name_to_guid, textures are copied
+            from temp files extracted from the .unitypackage.
+        texture_name_to_guid: Optional reverse mapping of texture name to GUID.
+            Used to look up the GUID for a texture name.
 
     Returns:
         Tuple of (textures_copied, textures_fallback, textures_missing) where:
@@ -524,8 +565,32 @@ def copy_textures(
     copied = 0
     fallback_count = 0
     missing = 0
+    from_temp = 0
+    from_source = 0
 
     for texture_name in required:
+        # First, try to find texture in temp files from .unitypackage
+        temp_path = None
+        if texture_guid_to_path and texture_name_to_guid:
+            guid = texture_name_to_guid.get(texture_name)
+            if guid:
+                temp_path = texture_guid_to_path.get(guid)
+
+        if temp_path and temp_path.exists():
+            # Copy from temp file
+            dest_path = output_textures / texture_name
+
+            if dry_run:
+                logger.info("[DRY RUN] Would copy texture from temp: %s", texture_name)
+            else:
+                shutil.copy2(temp_path, dest_path)
+                logger.debug("Copied texture from temp: %s", texture_name)
+
+            copied += 1
+            from_temp += 1
+            continue
+
+        # Fall back to SourceFiles search
         source_path = find_texture_file(source_textures, texture_name)
 
         if source_path is None:
@@ -561,18 +626,36 @@ def copy_textures(
                 missing += 1
             continue
 
-        # Preserve original extension
-        dest_path = output_textures / source_path.name
+        # Use the requested texture name (what materials expect), but with source's extension
+        # This handles the Synty naming inconsistency where SourceFiles have "Texture" in the name
+        # but Unity/materials reference without it (e.g., PolygonSamurai_01_A vs PolygonSamurai_Texture_01_A)
+        base_name = texture_name
+        for ext in TEXTURE_EXTENSIONS:
+            if texture_name.lower().endswith(ext.lower()):
+                base_name = texture_name[:-len(ext)]
+                break
+        dest_name = base_name + source_path.suffix
+        dest_path = output_textures / dest_name
 
         if dry_run:
-            logger.info("[DRY RUN] Would copy texture: %s -> %s", source_path, dest_path)
+            logger.info("[DRY RUN] Would copy texture: %s -> %s", source_path.name, dest_name)
         else:
             shutil.copy2(source_path, dest_path)
-            logger.debug("Copied texture: %s", source_path.name)
+            if source_path.name != dest_name:
+                logger.debug("Copied texture: %s -> %s (renamed)", source_path.name, dest_name)
+            else:
+                logger.debug("Copied texture: %s", source_path.name)
 
         copied += 1
+        from_source += 1
 
-    if fallback_count > 0:
+    # Log summary with source breakdown
+    if from_temp > 0 or from_source > 0:
+        logger.info(
+            "Copied %d textures (%d from package, %d from SourceFiles), %d fallback, %d missing",
+            copied, from_temp, from_source, fallback_count, missing
+        )
+    elif fallback_count > 0:
         logger.info(
             "Copied %d textures, %d using fallback atlas, %d missing",
             copied, fallback_count, missing
@@ -936,8 +1019,6 @@ def print_summary(stats: ConversionStats) -> None:
     print(f"  Materials Parsed:    {stats.materials_parsed}")
     print(f"  Materials Generated: {stats.materials_generated}")
     print(f"  Textures Copied:     {stats.textures_copied}")
-    if stats.textures_fallback > 0:
-        print(f"  Textures Fallback:   {stats.textures_fallback} (using pack atlas)")
     print(f"  Textures Missing:    {stats.textures_missing}")
     print(f"  Shaders Copied:      {stats.shaders_copied}")
     print(f"  FBX Files Copied:    {stats.fbx_copied}")
@@ -973,6 +1054,64 @@ def print_summary(stats: ConversionStats) -> None:
     print("=" * 60 + "\n")
 
 
+def build_shader_cache(
+    prefabs: list[PrefabMaterials],
+) -> tuple[dict[str, str], list[str]]:
+    """Build shader decision cache from MaterialList prefabs with LOD inheritance.
+
+    Uses the simplified detection flow:
+    1. If uses_custom_shader=False -> polygon.gdshader (immediate)
+    2. If uses_custom_shader=True -> name pattern matching -> shader or polygon
+    3. LOD inheritance: LOD0's shader decision applies to all LODs
+
+    Args:
+        prefabs: List of PrefabMaterials from parse_material_list().
+
+    Returns:
+        Tuple of (shader_cache, unmatched_materials) where:
+        - shader_cache: Maps material_name -> shader_filename
+        - unmatched_materials: Materials that need manual pattern addition
+    """
+    shader_cache: dict[str, str] = {}
+    unmatched_materials: list[str] = []
+
+    for prefab in prefabs:
+        # Track shader decisions per slot index within this prefab
+        # This enables LOD inheritance: LOD0's slot 0 shader -> all LODs' slot 0
+        prefab_slot_shaders: dict[int, str] = {}
+
+        for mesh_idx, mesh in enumerate(prefab.meshes):
+            is_lod0 = mesh_idx == 0  # First mesh is LOD0
+
+            for slot_idx, slot in enumerate(mesh.slots):
+                mat_name = slot.material_name
+
+                if mat_name in shader_cache:
+                    continue  # Already decided
+
+                if is_lod0:
+                    # LOD0: make the shader decision
+                    shader, matched = determine_shader(mat_name, slot.uses_custom_shader)
+
+                    shader_cache[mat_name] = shader
+                    prefab_slot_shaders[slot_idx] = shader
+
+                    if not matched:
+                        unmatched_materials.append(mat_name)
+                else:
+                    # LOD1+: inherit from LOD0's slot
+                    if slot_idx in prefab_slot_shaders:
+                        shader_cache[mat_name] = prefab_slot_shaders[slot_idx]
+                    else:
+                        # No LOD0 slot to inherit from, use custom shader check
+                        shader, matched = determine_shader(mat_name, slot.uses_custom_shader)
+                        shader_cache[mat_name] = shader
+                        if not matched:
+                            unmatched_materials.append(mat_name)
+
+    return shader_cache, unmatched_materials
+
+
 def run_conversion(config: ConversionConfig) -> ConversionStats:
     """Execute the full conversion pipeline.
 
@@ -983,16 +1122,16 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
     2. Create output directory structure (shaders/, textures/, materials/, etc.)
     3. Extract Unity package and build GUID mappings
     4. Parse all .mat files from the package
-    5. Detect shaders and map material properties to Godot equivalents
+    4.5. Parse MaterialList*.txt early (for shader detection cache)
+    4.6. Build shader cache with LOD inheritance using determine_shader()
+    5. Map material properties to Godot equivalents (using shader cache)
     6. Generate .tres material files
     7. Copy .gdshader files from the converter project
     8. Copy required textures from SourceFiles/Textures
     8.5. Copy FBX files from SourceFiles/FBX (unless --skip-fbx-copy)
-    9. Parse MaterialList*.txt if present
-    10. Generate mesh_material_mapping.json
-    10.5. Create placeholder materials for missing references
-    11. Generate project.godot with global shader uniforms
-    12. Run Godot CLI to convert FBX to .tscn (unless --skip-godot-cli)
+    9. Generate mesh_material_mapping.json (uses cached prefabs)
+    10. Generate project.godot with global shader uniforms
+    11. Run Godot CLI to convert FBX to .tscn (unless --skip-godot-cli)
 
     Args:
         config: ConversionConfig instance with all required paths and options.
@@ -1015,15 +1154,25 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
     """
     stats = ConversionStats()
 
+    # Extract pack name from source_files parent directory
+    # e.g., C:\SyntyComplete\PolygonNature\SourceFiles -> pack_name = "PolygonNature"
+    raw_pack_name = config.source_files.parent.name
+    # Sanitize to remove invalid filesystem characters
+    pack_name = sanitize_filename(raw_pack_name)
+    if pack_name != raw_pack_name:
+        logger.warning("Pack name sanitized: '%s' -> '%s'", raw_pack_name, pack_name)
+    pack_output_dir = config.output_dir / pack_name
+
     # Step 1: Validate inputs (already done in parse_args, but double-check)
     logger.info("Starting conversion pipeline...")
+    logger.info("  Pack Name: %s", pack_name)
     logger.info("  Unity Package: %s", config.unity_package)
     logger.info("  Source Files: %s", config.source_files)
-    logger.info("  Output: %s", config.output_dir)
+    logger.info("  Output: %s", pack_output_dir)
 
     # Step 2: Create output directory structure
     logger.info("Creating output directory structure...")
-    setup_output_directories(config.output_dir, config.dry_run)
+    setup_output_directories(pack_output_dir, config.dry_run)
 
     # Step 3: Extract Unity package
     logger.info("Extracting Unity package...")
@@ -1036,152 +1185,187 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
         stats.errors.append(error_msg)
         return stats
 
-    # Step 4: Parse all .mat files
-    logger.info("Parsing Unity materials...")
-    material_guids = get_material_guids(guid_map)
-    unity_materials: list[tuple[str, UnityMaterial]] = []
+    # Store temp dir path for cleanup (always runs via finally, even on error)
+    temp_dir_to_cleanup = None
+    if guid_map.texture_guid_to_path:
+        temp_dir_to_cleanup = next(iter(guid_map.texture_guid_to_path.values())).parent
 
-    for guid in material_guids:
-        content = guid_map.guid_to_content.get(guid)
-        if content is None:
-            warning_msg = f"No content for material GUID: {guid}"
-            logger.warning(warning_msg)
-            stats.warnings.append(warning_msg)
-            continue
+    try:
+        # Step 4: Parse all .mat files
+        logger.info("Parsing Unity materials...")
+        material_guids = get_material_guids(guid_map)
+        unity_materials: list[tuple[str, UnityMaterial]] = []
 
-        try:
-            material = parse_material_bytes(content)
-            unity_materials.append((guid, material))
-            stats.materials_parsed += 1
-        except Exception as e:
-            warning_msg = f"Failed to parse material GUID {guid}: {e}"
-            logger.warning(warning_msg)
-            stats.warnings.append(warning_msg)
+        for guid in material_guids:
+            content = guid_map.guid_to_content.get(guid)
+            if content is None:
+                warning_msg = f"No content for material GUID: {guid}"
+                logger.warning(warning_msg)
+                stats.warnings.append(warning_msg)
+                continue
 
-    logger.info("Parsed %d Unity materials", stats.materials_parsed)
+            try:
+                material = parse_material_bytes(content)
+                unity_materials.append((guid, material))
+                stats.materials_parsed += 1
+            except Exception as e:
+                warning_msg = f"Failed to parse material GUID {guid}: {e}"
+                logger.warning(warning_msg)
+                stats.warnings.append(warning_msg)
 
-    # Step 5: Detect shaders and map properties
-    logger.info("Mapping materials to Godot format...")
-    mapped_materials: list[MappedMaterial] = []
-    required_textures: set[str] = set()
+        logger.info("Parsed %d Unity materials", stats.materials_parsed)
 
-    for guid, unity_mat in unity_materials:
-        try:
-            mapped = map_material(unity_mat, guid_map.texture_guid_to_name)
-            mapped_materials.append(mapped)
+        # Step 4.5: Parse MaterialList*.txt early for shader detection
+        # This needs to happen BEFORE shader detection so we can use the
+        # uses_custom_shader information from MaterialList
+        material_list_files = list(config.source_files.glob("MaterialList*.txt"))
+        prefabs: list[PrefabMaterials] = []
+        shader_cache: dict[str, str] = {}
+        unmatched_materials: list[str] = []
 
-            # Collect required textures
-            for texture_name in mapped.textures.values():
-                required_textures.add(texture_name)
+        if material_list_files:
+            for material_list_path in material_list_files:
+                logger.info("Parsing %s for shader detection...", material_list_path.name)
+                try:
+                    file_prefabs = parse_material_list(material_list_path)
+                    prefabs.extend(file_prefabs)
+                    logger.info("  Found %d prefabs in %s", len(file_prefabs), material_list_path.name)
+                except Exception as e:
+                    logger.warning("Failed to parse %s: %s", material_list_path.name, e)
 
-        except Exception as e:
-            warning_msg = f"Failed to map material '{unity_mat.name}': {e}"
-            logger.warning(warning_msg)
-            stats.warnings.append(warning_msg)
+            logger.info("Total prefabs from all MaterialList files: %d", len(prefabs))
 
-    logger.info("Mapped %d materials, requiring %d textures", len(mapped_materials), len(required_textures))
+            # Build shader cache with LOD inheritance
+            logger.info("Building shader decision cache...")
+            shader_cache, unmatched_materials = build_shader_cache(prefabs)
+            logger.info("Shader cache: %d materials cached", len(shader_cache))
 
-    # Step 6: Generate .tres files
-    logger.info("Generating Godot .tres material files...")
-    materials_dir = config.output_dir / "materials"
+            # Log unmatched materials for user to add patterns
+            if unmatched_materials:
+                logger.warning("=" * 60)
+                logger.warning("UNMATCHED MATERIALS - Consider adding name patterns for:")
+                for mat_name in sorted(set(unmatched_materials)):
+                    logger.warning("  - %s", mat_name)
+                logger.warning("=" * 60)
+        else:
+            logger.info("MaterialList*.txt not found, using fallback shader detection")
 
-    for mapped_mat in mapped_materials:
-        try:
-            # Generate .tres content
-            tres_content = generate_tres(
-                mapped_mat,
-                shader_base="res://shaders",
-                texture_base="res://textures"
-            )
+        # Step 5: Detect shaders and map properties
+        logger.info("Mapping materials to Godot format...")
+        mapped_materials: list[MappedMaterial] = []
+        required_textures: set[str] = set()
 
-            # Sanitize filename
-            filename = sanitize_filename(mapped_mat.name) + ".tres"
-            output_path = materials_dir / filename
+        for guid, unity_mat in unity_materials:
+            try:
+                # Use cached shader decision if available
+                cached_shader = shader_cache.get(unity_mat.name)
+                mapped = map_material(unity_mat, guid_map.texture_guid_to_name, override_shader=cached_shader)
+                mapped_materials.append(mapped)
 
-            if config.dry_run:
-                logger.info("[DRY RUN] Would write material: %s", output_path)
-            else:
-                write_tres_file(tres_content, output_path)
-                logger.debug("Wrote material: %s", filename)
+                # Collect required textures
+                for texture_name in mapped.textures.values():
+                    required_textures.add(texture_name)
 
-            stats.materials_generated += 1
+            except Exception as e:
+                warning_msg = f"Failed to map material '{unity_mat.name}': {e}"
+                logger.warning(warning_msg)
+                stats.warnings.append(warning_msg)
 
-        except Exception as e:
-            warning_msg = f"Failed to generate .tres for '{mapped_mat.name}': {e}"
-            logger.warning(warning_msg)
-            stats.warnings.append(warning_msg)
+        logger.info("Mapped %d materials, requiring %d textures", len(mapped_materials), len(required_textures))
 
-    logger.info("Generated %d .tres material files", stats.materials_generated)
+        # Step 6: Generate .tres files
+        logger.info("Generating Godot .tres material files...")
+        materials_dir = pack_output_dir / "materials"
 
-    # Step 7: Copy .gdshader files
-    logger.info("Copying shader files...")
-    stats.shaders_copied = copy_shaders(
-        config.source_files,  # Not actually used - we use script directory
-        config.output_dir,
-        config.dry_run,
-    )
+        for mapped_mat in mapped_materials:
+            try:
+                # Generate .tres content
+                tres_content = generate_tres(
+                    mapped_mat,
+                    shader_base="res://shaders",
+                    texture_base="res://textures"
+                )
 
-    # Step 8: Copy required textures
-    logger.info("Copying texture files...")
-    source_textures = config.source_files / "Textures"
-    output_textures = config.output_dir / "textures"
+                # Sanitize filename
+                filename = sanitize_filename(mapped_mat.name) + ".tres"
+                output_path = materials_dir / filename
 
-    # Find fallback texture (pack's main atlas) for missing generic textures
-    fallback_texture = find_fallback_texture(source_textures)
-    if fallback_texture:
-        logger.info("Using fallback texture for missing generics: %s", fallback_texture.name)
-    else:
-        logger.warning("No fallback texture found - missing textures will not be substituted")
+                if config.dry_run:
+                    logger.info("[DRY RUN] Would write material: %s", output_path)
+                else:
+                    write_tres_file(tres_content, output_path)
+                    logger.debug("Wrote material: %s", filename)
 
-    stats.textures_copied, stats.textures_fallback, stats.textures_missing = copy_textures(
-        source_textures,
-        output_textures,
-        required_textures,
-        config.dry_run,
-        fallback_texture,
-    )
+                stats.materials_generated += 1
 
-    # Step 8.5: Copy FBX files
-    if not config.skip_fbx_copy:
-        logger.info("Copying FBX files...")
-        source_fbx = config.source_files / "FBX"
-        output_models = config.output_dir / "models"
+            except Exception as e:
+                warning_msg = f"Failed to generate .tres for '{mapped_mat.name}': {e}"
+                logger.warning(warning_msg)
+                stats.warnings.append(warning_msg)
 
-        stats.fbx_copied, stats.fbx_skipped = copy_fbx_files(
-            source_fbx,
-            output_models,
+        logger.info("Generated %d .tres material files", stats.materials_generated)
+
+        # Step 7: Copy .gdshader files
+        logger.info("Copying shader files...")
+        stats.shaders_copied = copy_shaders(
+            config.source_files,  # Not actually used - we use script directory
+            pack_output_dir,
             config.dry_run,
         )
 
-        if stats.fbx_copied == 0 and stats.fbx_skipped == 0:
-            warning_msg = f"No FBX files found in {source_fbx}"
-            stats.warnings.append(warning_msg)
-    else:
-        logger.info("Skipping FBX copy (--skip-fbx-copy)")
+        # Step 8: Copy required textures
+        logger.info("Copying texture files...")
+        source_textures = config.source_files / "Textures"
+        output_textures = pack_output_dir / "textures"
 
-    # Step 9: Parse MaterialList*.txt (if exists)
-    material_list_files = list(config.source_files.glob("MaterialList*.txt"))
-    if material_list_files:
-        material_list_path = material_list_files[0]  # Use first match
-        logger.info("Parsing %s...", material_list_path.name)
-        try:
-            prefabs = parse_material_list(material_list_path)
+        # Build reverse lookup: texture_name -> GUID
+        texture_name_to_guid = {name: guid for guid, name in guid_map.texture_guid_to_name.items()}
 
-            # Step 10: Generate mesh_material_mapping.json
-            mapping_output = config.output_dir / "mesh_material_mapping.json"
+        # Copy required textures (no fallback - missing textures will be logged as warnings)
+        # Prefer textures from .unitypackage temp files over SourceFiles
+        stats.textures_copied, stats.textures_fallback, stats.textures_missing = copy_textures(
+            source_textures,
+            output_textures,
+            required_textures,
+            config.dry_run,
+            fallback_texture=None,  # No fallback - let missing textures fail
+            texture_guid_to_path=guid_map.texture_guid_to_path,
+            texture_name_to_guid=texture_name_to_guid,
+        )
+
+        # Step 8.5: Copy FBX files
+        if not config.skip_fbx_copy:
+            logger.info("Copying FBX files...")
+            source_fbx = config.source_files / "FBX"
+            output_models = pack_output_dir / "models"
+
+            stats.fbx_copied, stats.fbx_skipped = copy_fbx_files(
+                source_fbx,
+                output_models,
+                config.dry_run,
+            )
+
+            if stats.fbx_copied == 0 and stats.fbx_skipped == 0:
+                warning_msg = f"No FBX files found in {source_fbx}"
+                stats.warnings.append(warning_msg)
+        else:
+            logger.info("Skipping FBX copy (--skip-fbx-copy)")
+
+        # Step 9: Generate mesh_material_mapping.json (uses prefabs parsed in Step 4.5)
+        if prefabs:
+            mapping_output = pack_output_dir / "mesh_material_mapping.json"
             if config.dry_run:
                 logger.info("[DRY RUN] Would write mesh_material_mapping.json")
             else:
                 generate_mesh_material_mapping_json(prefabs, mapping_output)
                 logger.info("Generated mesh_material_mapping.json")
 
-            # Step 10.5: Generate placeholder materials for missing references
+            # Step 9.5: Check for missing material references (no placeholders - just warn)
             logger.info("Checking for missing material references...")
-            materials_dir = config.output_dir / "materials"
+            materials_dir = pack_output_dir / "materials"
             existing_materials = {f.stem for f in materials_dir.glob("*.tres")}
 
             # Collect all referenced materials from prefabs
-            # Structure: prefab -> meshes -> slots -> material_name
             referenced_materials: set[str] = set()
             for prefab in prefabs:
                 for mesh in prefab.meshes:
@@ -1189,123 +1373,72 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
                         if slot.material_name:
                             referenced_materials.add(slot.material_name)
 
-            # Find missing materials
+            # Find missing materials - just warn, don't create placeholders
             missing_materials = referenced_materials - existing_materials
 
             if missing_materials:
-                logger.info(
-                    "Found %d missing material(s), resolving...",
+                logger.warning(
+                    "Found %d missing material(s) - these meshes will use default materials:",
                     len(missing_materials)
                 )
-                from shader_mapping import create_placeholder_material, detect_shader_type
-                from tres_generator import generate_and_write_tres
-                import shutil
-
-                # Build a map of existing materials by shader type
-                # So we can find similar materials for missing ones
-                materials_by_shader: dict[str, list[str]] = {}
-                for mat_file in materials_dir.glob("*.tres"):
-                    # Read first few lines to find shader reference
-                    try:
-                        content = mat_file.read_text(encoding="utf-8")
-                        for line in content.split("\n"):
-                            if "res://shaders/" in line:
-                                shader = line.split("res://shaders/")[1].split('"')[0]
-                                if shader not in materials_by_shader:
-                                    materials_by_shader[shader] = []
-                                materials_by_shader[shader].append(mat_file.stem)
-                                break
-                    except Exception:
-                        pass
-
                 for mat_name in sorted(missing_materials):
-                    if config.dry_run:
-                        logger.info("[DRY RUN] Would resolve missing material: %s", mat_name)
-                        continue
-
-                    # Detect what shader this material should use based on its name
-                    target_shader = detect_shader_type("", mat_name)
-
-                    # Try to find an existing material with the same shader
-                    similar_materials = materials_by_shader.get(target_shader, [])
-
-                    if similar_materials:
-                        # Use the first similar material as a substitute
-                        # Copy it with the missing material's name
-                        source_name = similar_materials[0]
-                        source_path = materials_dir / f"{source_name}.tres"
-                        dest_path = materials_dir / f"{mat_name}.tres"
-
-                        shutil.copy2(source_path, dest_path)
-                        stats.materials_generated += 1
-                        logger.info(
-                            "Mapped missing material: %s -> %s (copied from %s)",
-                            mat_name, target_shader, source_name
-                        )
-                    else:
-                        # No similar material exists, generate placeholder
-                        placeholder = create_placeholder_material(mat_name)
-                        generate_and_write_tres(placeholder, materials_dir)
-                        stats.materials_generated += 1
-                        logger.info(
-                            "Generated placeholder: %s.tres -> %s (no similar material found)",
-                            mat_name, placeholder.shader_file
-                        )
+                    logger.warning("  Missing: %s", mat_name)
             else:
                 logger.info("All referenced materials exist")
-
-        except Exception as e:
-            warning_msg = f"Failed to parse {material_list_path.name}: {e}"
-            logger.warning(warning_msg)
-            stats.warnings.append(warning_msg)
-    else:
-        logger.info("MaterialList*.txt not found, skipping mesh-material mapping")
-
-    # Step 11: Generate project.godot
-    logger.info("Generating project.godot...")
-    generate_project_godot(config.output_dir, config.dry_run)
-
-    # Step 12: Run Godot CLI to convert FBX to .tscn scene files
-    if not config.skip_godot_cli:
-        logger.info("Running Godot CLI conversion...")
-
-        (
-            stats.godot_import_success,
-            stats.godot_convert_success,
-            stats.godot_timeout_occurred,
-        ) = run_godot_cli(
-            config.godot_exe,
-            config.output_dir,
-            config.godot_timeout,
-            config.dry_run,
-        )
-
-        # Count generated .tscn files
-        meshes_dir = config.output_dir / "meshes"
-        stats.meshes_converted = count_tscn_files(meshes_dir)
-
-        if stats.godot_timeout_occurred:
-            error_msg = f"Godot CLI timed out after {config.godot_timeout}s"
-            stats.errors.append(error_msg)
-        elif not stats.godot_import_success:
-            error_msg = "Godot import phase failed"
-            stats.errors.append(error_msg)
-        elif not stats.godot_convert_success and stats.meshes_converted == 0:
-            # Only error if no meshes were converted at all
-            error_msg = "Godot converter script failed"
-            stats.errors.append(error_msg)
-        elif stats.meshes_converted > 0:
-            logger.info("Generated %d .tscn scene files", stats.meshes_converted)
         else:
-            logger.warning("No mesh files generated")
-    else:
-        logger.info("Skipping Godot CLI (--skip-godot-cli)")
+            logger.info("No MaterialList data available, skipping mesh-material mapping")
 
-    # Write conversion log (not in dry run for the log file itself)
-    if not config.dry_run:
-        write_conversion_log(config.output_dir, stats, config)
+        # Step 11: Generate project.godot
+        logger.info("Generating project.godot...")
+        generate_project_godot(pack_output_dir, config.dry_run)
 
-    return stats
+        # Step 12: Run Godot CLI to convert FBX to .tscn scene files
+        if not config.skip_godot_cli:
+            logger.info("Running Godot CLI conversion...")
+
+            (
+                stats.godot_import_success,
+                stats.godot_convert_success,
+                stats.godot_timeout_occurred,
+            ) = run_godot_cli(
+                config.godot_exe,
+                pack_output_dir,
+                config.godot_timeout,
+                config.dry_run,
+            )
+
+            # Count generated .tscn files
+            meshes_dir = pack_output_dir / "meshes"
+            stats.meshes_converted = count_tscn_files(meshes_dir)
+
+            if stats.godot_timeout_occurred:
+                error_msg = f"Godot CLI timed out after {config.godot_timeout}s"
+                stats.errors.append(error_msg)
+            elif not stats.godot_import_success:
+                error_msg = "Godot import phase failed"
+                stats.errors.append(error_msg)
+            elif not stats.godot_convert_success and stats.meshes_converted == 0:
+                # Only error if no meshes were converted at all
+                error_msg = "Godot converter script failed"
+                stats.errors.append(error_msg)
+            elif stats.meshes_converted > 0:
+                logger.info("Generated %d .tscn scene files", stats.meshes_converted)
+            else:
+                logger.warning("No mesh files generated")
+        else:
+            logger.info("Skipping Godot CLI (--skip-godot-cli)")
+
+        # Write conversion log (not in dry run for the log file itself)
+        if not config.dry_run:
+            write_conversion_log(pack_output_dir, stats, config)
+
+        return stats
+
+    finally:
+        # Cleanup temp texture files (always runs, even on error)
+        if temp_dir_to_cleanup and temp_dir_to_cleanup.exists():
+            shutil.rmtree(temp_dir_to_cleanup, ignore_errors=True)
+            logger.info("Cleaned up temp texture directory: %s", temp_dir_to_cleanup)
 
 
 def main() -> int:
