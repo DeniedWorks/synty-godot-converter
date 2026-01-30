@@ -393,23 +393,23 @@ Examples:
 
 
 def setup_output_directories(output_dir: Path, dry_run: bool) -> None:
-    """Create the output directory structure.
+    """Create the output directory structure for pack assets.
 
     Creates:
         output_dir/
-            shaders/
             textures/
             materials/
             models/
             meshes/
 
+    Note: shaders/ is created at project root by copy_shaders(), not here.
+
     Args:
-        output_dir: Root output directory.
+        output_dir: Pack output directory.
         dry_run: If True, only log what would be created.
     """
     directories = [
         output_dir,
-        output_dir / "shaders",
         output_dir / "textures",
         output_dir / "materials",
         output_dir / "models",
@@ -1565,13 +1565,16 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
         logger.info("Generating Godot .tres material files...")
         materials_dir = pack_output_dir / "materials"
 
+        # Pack-relative texture path (textures are in pack folder, not root)
+        texture_base = f"res://{pack_name}/textures"
+
         for mapped_mat in mapped_materials:
             try:
                 # Generate .tres content
                 tres_content = generate_tres(
                     mapped_mat,
                     shader_base="res://shaders",
-                    texture_base="res://textures"
+                    texture_base=texture_base
                 )
 
                 # Sanitize filename
