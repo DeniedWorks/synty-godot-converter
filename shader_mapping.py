@@ -493,6 +493,8 @@ TEXTURE_MAP_WATER: dict[str, str] = {
     # Foam textures (auto-enable foam features when present)
     "_Foam_Noise_Texture": "foam_noise_texture",
     "_Foam_Texture": "foam_noise_texture",  # Older naming convention
+    "_Foam_Texture1": "foam_noise_texture",  # Goblin War Camp variant
+    "_FoamMask": "noise_texture",  # Foam masking (Goblin War Camp)
     "_Noise_Texture": "noise_texture",  # Global foam noise texture
     "_Normal_Map": "water_normal_texture",  # Alternative normal map name
     "_Normal_Texture": "water_normal_texture",
@@ -500,6 +502,15 @@ TEXTURE_MAP_WATER: dict[str, str] = {
     "_Shore_Foam_Noise_Texture": "shore_foam_noise_texture",
     "_Water_Normal_Texture": "water_normal_texture",  # Water normal texture
     "_WaterNormal": "water_normal_texture",  # Older naming for water normal
+    "_WaterNormal1": "water_normal_texture",  # Secondary normal (Goblin War Camp)
+    "_WaterNormal2": "water_normal_texture",  # Tertiary normal (Goblin War Camp)
+    # Ripple normal maps (Goblin War Camp, Dwarven Dungeon)
+    "_RipplesNormal": "water_normal_texture",
+    "_RipplesNormal2": "water_normal_texture",
+    # Wave mask textures (Goblin War Camp)
+    "_WaveMask": "noise_texture",
+    "_WaveMaskTuff": "noise_texture",
+    "_WaveNoise": "noise_texture",
     # Shore wave foam (separate from shore foam)
     "_Shore_Wave_Foam_Noise_Texture": "shore_wave_foam_noise_texture",
     # Water noise/distortion textures
@@ -718,9 +729,20 @@ FLOAT_MAP_WATER: dict[str, str] = {
     "_Very_Deep_Height": "very_deep_height",
     "_Depth_Distance": "depth_distance",
     "_Water_Depth": "water_depth",
+    # Depth falloff controls (Goblin War Camp, Dwarven Dungeon)
+    "_ShallowFalloff": "shallow_intensity",
+    "_OverallFalloff": "base_opacity",
+    "_OpacityFalloff": "shallows_opacity",
     # Foam properties
     "_Shore_Foam_Intensity": "shore_foam_intensity",
+    "_FoamShoreline": "shore_foam_intensity",  # Goblin War Camp variant
+    "_FoamDepth": "shore_foam_intensity",  # Foam depth threshold
+    "_FoamFalloff": "ocean_foam_opacity",  # Foam fade control
+    # Caustics properties
     "_Caustics_Intensity": "caustics_intensity",
+    "_CausticDepthFade": "caustics_intensity",  # Depth-based caustic fade
+    "_CausticScale": "caustics_scale",  # Caustic pattern scale
+    "_CausticSpeed": "caustics_speed",  # Caustic animation speed
     "_Shallow_Intensity": "shallow_intensity",
     # Waterfall (ElvenRealm)
     "_FresnelPower": "fresnel_power",
@@ -754,6 +776,12 @@ FLOAT_MAP_CLOUDS: dict[str, str] = {
     "_Scattering_Multiplier": "scattering_multiplier",
     "_Cloud_Speed": "cloud_speed",
     "_Cloud_Strength": "cloud_strength",
+    # SciFi Space cloud variants
+    "_CloudCoverage": "cloud_strength",
+    "_CloudPower": "cloud_strength",
+    "_CloudSpeed": "cloud_speed",
+    "_Cloud_Contrast": "scattering_multiplier",
+    "_Cloud_Falloff": "fog_density",
     # Aurora effect (Vikings, ElvenRealm)
     "_Aurora_Speed": "aurora_speed",
     "_Aurora_Intensity": "aurora_intensity",
@@ -858,11 +886,19 @@ COLOR_MAP_WATER: dict[str, str] = {
     "_Shallow_Color": "shallow_color",
     "_Deep_Color": "deep_color",
     "_Very_Deep_Color": "very_deep_color",
+    # British spelling variants (Goblin War Camp, Dwarven Dungeon)
+    "_ShallowColour": "shallow_color",
+    "_DeepColour": "deep_color",
+    "_VeryDeepColour": "very_deep_color",
     # Foam and effects
     "_Foam_Color": "foam_color",
     "_Caustics_Color": "caustics_color",
+    "_CausticColour": "caustics_color",  # British spelling variant
     "_Shore_Foam_Color_Tint": "shore_foam_color_tint",
     "_Shore_Wave_Color_Tint": "shore_wave_color_tint",
+    # Glow/emission colors (Goblin War Camp, Dwarven Dungeon)
+    "_FoamEmitColour": "shore_foam_color_tint",  # Foam emission color
+    "_DepthGlowColour": "very_deep_color",  # Deep water glow
     # Base/Tint colors
     "_Color": "color_tint",
     "_Color_Tint": "color_tint",
@@ -898,6 +934,8 @@ COLOR_MAP_CLOUDS: dict[str, str] = {
     "_Base_Color": "base_color",
     "_Fresnel_Color": "fresnel_color",
     "_Scattering_Color": "scattering_color",
+    # SciFi Space cloud color variant
+    "_CloudColor": "top_color",
     # Aurora (Vikings, ElvenRealm)
     "_Aurora_Color_01": "aurora_color_01",
     "_Aurora_Color_02": "aurora_color_02",
@@ -954,6 +992,7 @@ ALPHA_FIX_PROPERTIES: set[str] = {
     "_Water_Far_Color",
     "_Foam_Color",
     "_Caustics_Color",
+    "_CausticColour",
     "_Shore_Foam_Color_Tint",
     "_Shore_Wave_Color_Tint",
     "_WaterDeepColor",
@@ -961,6 +1000,12 @@ ALPHA_FIX_PROPERTIES: set[str] = {
     "_WaterColour",
     "_FresnelColour",
     "_Very_Deep_Color",
+    # British spelling variants (Goblin War Camp, Dwarven Dungeon)
+    "_ShallowColour",
+    "_DeepColour",
+    "_VeryDeepColour",
+    "_FoamEmitColour",
+    "_DepthGlowColour",
     # Foliage (base colors and emissives)
     "_Leaf_Base_Color",
     "_Trunk_Base_Color",

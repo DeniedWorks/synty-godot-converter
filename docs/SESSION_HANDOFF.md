@@ -181,6 +181,22 @@ Added mappings for texture properties that trigger auto-enable:
 | 27 | POLYGON_Pro_Racer | 230 |
 | 28 | POLYGON_Military | 111 |
 | 29 | POLYGON_Modular_Fantasy_Hero | 33 |
+| 30 | POLYGON_Dungeon_Realms | 74 |
+| 31 | POLYGON_Street_Racer | 116 |
+| 32 | POLYGON_Kaiju | 49 |
+| 33 | POLYGON_War | 57 |
+| 34 | POLYGON_Mech | 35 |
+| 35 | POLYGON_Casino | 96 |
+| 36 | POLYGON_Gang_Warfare | 29 |
+| 37 | POLYGON_SciFi_Space | 113 |
+| 38 | POLYGON_Ancient_Egypt | 115 |
+| 39 | POLYGON_Fantasy_Rivals | 26 |
+| 40 | POLYGON_AncientEmpire | 131 |
+| 41 | POLYGON_Kids | 20 |
+| 42 | POLYGON_Goblin_War_Camp | 45 |
+| 43 | POLYGON_Dungeon | 42 |
+| 44 | POLYGON_Dwarven_Dungeon_Map | 56 |
+| 45 | POLYGON_Dungeon_Map | 1 |
 
 **To analyze additional packs:**
 ```bash
