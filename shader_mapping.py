@@ -513,7 +513,7 @@ TEXTURE_MAP_WATER: dict[str, str] = {
 TEXTURE_MAP_PARTICLES: dict[str, str] = {
     "_Albedo_Map": "albedo_map",
     "_MainTex": "albedo_map",  # Standard Unity particle texture
-    "_EmissionMap": "emission_map",
+    "_EmissionMap": "emission_texture",  # Consistent with polygon shader
 }
 
 # Skydome Shader (Sky Gradient)
@@ -728,10 +728,10 @@ FLOAT_MAP_WATER: dict[str, str] = {
 }
 
 FLOAT_MAP_PARTICLES: dict[str, str] = {
-    "_Alpha_Clip_Treshold": "alpha_clip_treshold",  # Note: Unity typo preserved for compatibility
-    "_Alpha_Clip_Threshold": "alpha_clip_treshold",  # Correct spelling variant
-    "_Cutoff": "alpha_clip_treshold",
-    "_AlphaCutoff": "alpha_clip_treshold",
+    "_Alpha_Clip_Treshold": "alpha_clip_threshold",  # Unity typo preserved for input compatibility
+    "_Alpha_Clip_Threshold": "alpha_clip_threshold",
+    "_Cutoff": "alpha_clip_threshold",
+    "_AlphaCutoff": "alpha_clip_threshold",
     "_Soft_Power": "soft_power",
     "_Soft_Distance": "soft_distance",
     "_Camera_Fade_Near": "camera_fade_near",
