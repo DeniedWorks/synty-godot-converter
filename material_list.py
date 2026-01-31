@@ -299,7 +299,7 @@ def parse_material_list(path: Path) -> list[PrefabMaterials]:
     if not prefabs:
         raise ValueError(f"No valid prefab entries found in: {path}")
 
-    logger.info(
+    logger.debug(
         f"Parsed MaterialList.txt: {len(prefabs)} prefabs, "
         f"{sum(len(p.meshes) for p in prefabs)} meshes"
     )
@@ -338,14 +338,14 @@ def get_mesh_to_materials_map(prefabs: list[PrefabMaterials]) -> dict[str, list[
         for mesh in prefab.meshes:
             material_names = [slot.material_name for slot in mesh.slots]
             if mesh.mesh_name in result:
-                logger.warning(
+                logger.debug(
                     f"Duplicate mesh name found: {mesh.mesh_name!r}. "
                     f"Previous materials: {result[mesh.mesh_name]}, "
                     f"New materials: {material_names}. Using new values."
                 )
             result[mesh.mesh_name] = material_names
 
-    logger.info(f"Built mesh-to-materials map: {len(result)} meshes")
+    logger.debug(f"Built mesh-to-materials map: {len(result)} meshes")
     return result
 
 
@@ -388,7 +388,7 @@ def generate_mesh_material_mapping_json(
     with output_path.open("w", encoding="utf-8") as f:
         json.dump(mesh_map, f, indent=indent, ensure_ascii=False)
 
-    logger.info(f"Wrote mesh material mapping to: {output_path}")
+    logger.debug(f"Wrote mesh material mapping to: {output_path}")
 
 
 def get_all_material_names(prefabs: list[PrefabMaterials]) -> set[str]:

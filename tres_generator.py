@@ -520,7 +520,7 @@ def generate_tres(
 
     content = "\n".join(lines)
 
-    logger.info(
+    logger.debug(
         "Generated .tres for material %s (shader=%s, textures=%d, params=%d)",
         material.name, material.shader_file,
         len(material.textures), len(shader_params)
@@ -554,7 +554,7 @@ def write_tres_file(content: str, output_path: Path) -> None:
     # Write the file
     output_path.write_text(content, encoding="utf-8")
 
-    logger.info("Wrote .tres file: %s", output_path)
+    logger.debug("Wrote .tres file: %s", output_path)
 
 
 # =============================================================================

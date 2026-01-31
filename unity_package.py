@@ -133,24 +133,24 @@ def extract_unitypackage(package_path: Path) -> GuidMap:
         # Parse the tar structure into {guid: {filename: content}}
         guid_data = _parse_tar_structure(tar)
 
-    logger.info("Parsed %d GUID entries from package", len(guid_data))
+    logger.debug("Parsed %d GUID entries from package", len(guid_data))
 
     # Build the GUID to pathname mapping
     guid_to_pathname = _build_guid_to_pathname(guid_data)
-    logger.info("Built pathname mapping for %d assets", len(guid_to_pathname))
+    logger.debug("Built pathname mapping for %d assets", len(guid_to_pathname))
 
     # Build texture GUID to name mapping
     texture_guid_to_name = _build_texture_guid_map(guid_to_pathname)
-    logger.info("Found %d texture assets", len(texture_guid_to_name))
+    logger.debug("Found %d texture assets", len(texture_guid_to_name))
 
     # Extract .mat file contents
     guid_to_content = _extract_material_contents(guid_data, guid_to_pathname)
-    logger.info("Extracted content for %d material files", len(guid_to_content))
+    logger.debug("Extracted content for %d material files", len(guid_to_content))
 
     # Extract textures to temp files
     temp_dir = Path(tempfile.mkdtemp(prefix="synty_textures_"))
     texture_guid_to_path = _extract_textures_to_temp(guid_data, guid_to_pathname, temp_dir)
-    logger.info(
+    logger.debug(
         "Extracted %d textures to temp directory: %s",
         len(texture_guid_to_path),
         temp_dir,

@@ -1954,7 +1954,7 @@ def map_material(
     # Validate shader-specific properties - fall back to polygon if material
     # doesn't have properties that justify using the specialized shader
     if not validate_shader_properties(shader_file, material):
-        logger.info(
+        logger.debug(
             "Shader %s detected for '%s' via name pattern, but no shader-specific "
             "properties found. Falling back to polygon.gdshader",
             shader_file, material.name
@@ -1982,7 +1982,7 @@ def map_material(
             if texture_name:
                 mapped_textures[godot_name] = texture_name
             else:
-                logger.warning(
+                logger.debug(
                     "Could not resolve texture GUID %s for property %s in material %s",
                     tex_ref.guid[:8], unity_name, material.name
                 )
@@ -2011,7 +2011,7 @@ def map_material(
     # Step 6: Apply defaults
     result = _apply_defaults(result)
 
-    logger.info(
+    logger.debug(
         "Mapped material %s -> %s (textures=%d, floats=%d, bools=%d, colors=%d)",
         material.name, shader_file,
         len(result.textures), len(result.floats),
@@ -2232,7 +2232,7 @@ def create_placeholder_material(material_name: str) -> MappedMaterial:
         colors=None,
     )
 
-    logger.info(
+    logger.debug(
         "Creating placeholder material '%s' -> %s",
         material_name, shader_file
     )
