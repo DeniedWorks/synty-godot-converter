@@ -14,7 +14,9 @@ Requirements:
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import queue
 import re
 import sys
@@ -52,6 +54,10 @@ DEFAULT_WINDOW_SIZE = "1080x640"
 DEFAULT_SYNTY_PATH = ""
 DEFAULT_GODOT_PATH = ""
 DEFAULT_OUTPUT_PATH = ""
+
+# Settings file location
+SETTINGS_DIR = Path(os.environ.get("APPDATA", Path.home())) / "SyntyConverter"
+SETTINGS_FILE = SETTINGS_DIR / "settings.json"
 
 # Logging queue check interval (ms)
 LOG_QUEUE_INTERVAL = 50
@@ -136,6 +142,9 @@ class SyntyConverterApp:
         # Build the GUI
         self._create_widgets()
         self._setup_logging()
+
+        # Load saved settings after widgets are created
+        self._load_settings()
 
         # Start log queue processing
         self._process_log_queue()
@@ -674,6 +683,83 @@ class SyntyConverterApp:
         # Schedule next check
         self.root.after(LOG_QUEUE_INTERVAL, self._process_log_queue)
 
+    # --- Settings Persistence ---
+
+    def _load_settings(self):
+        """Load settings from JSON file in AppData."""
+        try:
+            if SETTINGS_FILE.exists():
+                with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                    settings = json.load(f)
+
+                # Restore path fields
+                if "unity_package" in settings:
+                    self.unity_package_var.set(settings["unity_package"])
+                if "source_files" in settings:
+                    self.source_files_var.set(settings["source_files"])
+                if "output_dir" in settings:
+                    self.output_dir_var.set(settings["output_dir"])
+                if "godot_exe" in settings:
+                    self.godot_exe_var.set(settings["godot_exe"])
+
+                # Restore options
+                if "output_format" in settings:
+                    self.format_selector.set(settings["output_format"])
+                if "mesh_mode" in settings:
+                    self.mesh_mode_selector.set(settings["mesh_mode"])
+                if "filter" in settings:
+                    self.filter_var.set(settings["filter"])
+                if "timeout" in settings:
+                    self.timeout_var.set(settings["timeout"])
+                    self._update_timeout_label(settings["timeout"])
+
+                # Restore checkboxes
+                if "verbose" in settings:
+                    self.verbose_var.set(settings["verbose"])
+                if "dry_run" in settings:
+                    self.dry_run_var.set(settings["dry_run"])
+                if "skip_fbx" in settings:
+                    self.skip_fbx_var.set(settings["skip_fbx"])
+                if "skip_godot_cli" in settings:
+                    self.skip_godot_cli_var.set(settings["skip_godot_cli"])
+                if "skip_godot_import" in settings:
+                    self.skip_godot_import_var.set(settings["skip_godot_import"])
+
+        except (json.JSONDecodeError, OSError, KeyError):
+            # Corrupted or missing settings - use defaults silently
+            pass
+
+    def _save_settings(self):
+        """Save current settings to JSON file in AppData."""
+        settings = {
+            # Paths
+            "unity_package": self.unity_package_var.get(),
+            "source_files": self.source_files_var.get(),
+            "output_dir": self.output_dir_var.get(),
+            "godot_exe": self.godot_exe_var.get(),
+            # Options
+            "output_format": self.format_selector.get(),
+            "mesh_mode": self.mesh_mode_selector.get(),
+            "filter": self.filter_var.get(),
+            "timeout": self.timeout_var.get(),
+            # Checkboxes
+            "verbose": self.verbose_var.get(),
+            "dry_run": self.dry_run_var.get(),
+            "skip_fbx": self.skip_fbx_var.get(),
+            "skip_godot_cli": self.skip_godot_cli_var.get(),
+            "skip_godot_import": self.skip_godot_import_var.get(),
+        }
+
+        try:
+            # Create directory if it doesn't exist
+            SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
+
+            with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+                json.dump(settings, f, indent=2)
+        except OSError:
+            # Silently ignore save errors - not critical
+            pass
+
     def _validate_inputs(self) -> bool:
         """Validate all input fields before conversion."""
         errors = []
@@ -701,6 +787,9 @@ class SyntyConverterApp:
 
     def _start_conversion(self):
         """Start the conversion process in a background thread."""
+        # Save settings before conversion
+        self._save_settings()
+
         if not self._validate_inputs():
             return
 
