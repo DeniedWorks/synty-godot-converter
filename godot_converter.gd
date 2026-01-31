@@ -67,6 +67,11 @@ var collision_material: StandardMaterial3D = null
 ## Used for resolving material paths relative to the pack.
 var current_pack_folder: String = ""
 
+## Default material name for the current pack (e.g., "PolygonFantasyKingdom_Mat_01_A").
+## Detected automatically by scanning for *_Mat_01_A.tres files in the materials folder.
+## Used as a final fallback when no material mapping exists for a mesh.
+var default_material_name: String = ""
+
 
 ## Main entry point. Called when script runs via --script flag.
 ## Orchestrates the complete FBX-to-TSCN conversion process:
@@ -160,6 +165,14 @@ func discover_pack_folders() -> Array[String]:
 func process_pack_folder(pack_folder: String) -> void:
 	print("Processing pack: %s" % pack_folder)
 	current_pack_folder = pack_folder
+
+	# Detect default material for this pack
+	var materials_path := pack_folder + "/materials"
+	default_material_name = _detect_default_material(materials_path)
+	if not default_material_name.is_empty():
+		print("  Default material: %s" % default_material_name)
+	else:
+		print("  No default material found (no *_Mat_01_A.tres files)")
 
 	var models_path := pack_folder + "/models"
 	var meshes_output := pack_folder + "/meshes"
@@ -471,7 +484,8 @@ func extract_and_save_mesh(mesh_instance: MeshInstance3D, relative_dir: String, 
 
 ## Looks up material names for a mesh by name.
 ## Tries exact match first, then strips numeric suffixes added by Godot import
-## (like "_001", "_002"). Returns an array of material name strings.
+## (like "_001", "_002"). If still not found, tries various fallback patterns
+## for common naming conventions (SK_ to SM_, _Static suffix, etc.).
 ##
 ## @param mesh_name The mesh name to look up (e.g., "SM_Prop_Crystal_01_001").
 ## @returns Array[String] Material names for each surface. May contain empty strings
@@ -487,9 +501,20 @@ func get_material_names_for_mesh(mesh_name: String) -> Array[String]:
 		if base_name != mesh_name and mesh_to_materials.has(base_name):
 			lookup_name = base_name
 		else:
-			print("      Warning: No material mapping for mesh '%s'" % mesh_name)
-			warnings += 1
-			return material_names_result
+			# Try fallback patterns for common naming mismatches
+			var fallback_name := _try_material_fallbacks(base_name if base_name != mesh_name else mesh_name)
+			if not fallback_name.is_empty():
+				lookup_name = fallback_name
+			else:
+				# Final fallback: use default material if available
+				if not default_material_name.is_empty():
+					print("      Using default material for mesh '%s': %s" % [mesh_name, default_material_name])
+					material_names_result.append(default_material_name)
+					return material_names_result
+				else:
+					print("      Warning: No material mapping for mesh '%s'" % mesh_name)
+					warnings += 1
+					return material_names_result
 
 	var material_names = mesh_to_materials[lookup_name]
 
@@ -513,6 +538,64 @@ func get_material_names_for_mesh(mesh_name: String) -> Array[String]:
 	return material_names_result
 
 
+## Tries fallback patterns to find material mapping for a mesh name.
+## This handles common naming mismatches in Synty asset packs where mesh
+## names in FBX files differ from their MaterialList.txt entries.
+##
+## Fallback order:
+## 1. SK_ to SM_ conversion (skeletal meshes often share materials with static meshes)
+## 2. Remove _Static suffix (static variants use base mesh materials)
+## 3. Remove _Preset suffix (preset variants use base mesh materials)
+## 4. Remove sub-component suffixes (_Cork, _Liquid, _Handle, _Door_X, _Drawer_X, etc.)
+##
+## @param mesh_name The mesh name to find fallbacks for.
+## @returns String The fallback mesh name that was found in the mapping, or empty string if none found.
+func _try_material_fallbacks(mesh_name: String) -> String:
+	# Fallback 1: SK_ to SM_ conversion
+	# Skeletal meshes (SK_) often share materials with their static mesh (SM_) counterparts
+	if mesh_name.begins_with("SK_"):
+		var sm_name := "SM_" + mesh_name.substr(3)
+		if mesh_to_materials.has(sm_name):
+			print("      Fallback: '%s' -> '%s' (SK_ to SM_)" % [mesh_name, sm_name])
+			return sm_name
+
+	# Fallback 2: Remove _Static suffix
+	# Static variants (e.g., "SM_Prop_Barrel_Static") use base mesh materials ("SM_Prop_Barrel")
+	if mesh_name.ends_with("_Static"):
+		var base_name := mesh_name.substr(0, mesh_name.length() - 7)  # len("_Static") = 7
+		if mesh_to_materials.has(base_name):
+			print("      Fallback: '%s' -> '%s' (removed _Static)" % [mesh_name, base_name])
+			return base_name
+
+	# Fallback 3: Remove _Preset suffix
+	# Preset variants use base mesh materials
+	if mesh_name.ends_with("_Preset"):
+		var base_name := mesh_name.substr(0, mesh_name.length() - 7)  # len("_Preset") = 7
+		if mesh_to_materials.has(base_name):
+			print("      Fallback: '%s' -> '%s' (removed _Preset)" % [mesh_name, base_name])
+			return base_name
+
+	# Fallback 4: Remove sub-component suffixes
+	# Sub-components like _Cork, _Liquid, _Handle use the parent mesh's materials
+	var component_suffixes: Array[String] = [
+		"_Cork", "_Liquid", "_Handle",
+		"_Door_1", "_Door_2", "_Door_01", "_Door_02",
+		"_Drawer_01", "_Drawer_02", "_Drawer_03",
+		"_Chains_01", "_Chains_02",
+		"_Arrow_01", "_Arrow_02", "_Arrow_03"
+	]
+
+	for suffix in component_suffixes:
+		if mesh_name.ends_with(suffix):
+			var base_name := mesh_name.substr(0, mesh_name.length() - suffix.length())
+			if mesh_to_materials.has(base_name):
+				print("      Fallback: '%s' -> '%s' (removed %s)" % [mesh_name, base_name, suffix])
+				return base_name
+
+	# No fallback found
+	return ""
+
+
 ## Strips numeric suffixes like "_001", "_01", "001" from a name.
 ## Godot's FBX importer adds numeric suffixes to duplicate node names.
 ## This allows matching meshes even when suffixes are present.
@@ -523,6 +606,35 @@ func _strip_numeric_suffix(name: String) -> String:
 	var regex := RegEx.new()
 	regex.compile("(_?\\d+)$")
 	return regex.sub(name, "")
+
+
+## Detects the default material for a pack by scanning for *_Mat_01_A.tres files.
+## The pattern is typically Polygon{PackName}_Mat_01_A, which is the base material
+## used by most meshes in Synty packs.
+##
+## @param materials_dir Path to the materials directory to scan.
+## @returns String The default material name (without .tres extension), or empty string if not found.
+func _detect_default_material(materials_dir: String) -> String:
+	var dir := DirAccess.open(materials_dir)
+	if dir == null:
+		return ""
+
+	dir.list_dir_begin()
+	var file_name := dir.get_next()
+
+	while file_name != "":
+		if not dir.current_is_dir():
+			# Check for *_Mat_01_A.tres pattern (case-insensitive check)
+			if file_name.to_lower().ends_with(".tres"):
+				var base_name := file_name.get_basename()
+				if base_name.ends_with("_Mat_01_A"):
+					dir.list_dir_end()
+					return base_name
+
+		file_name = dir.get_next()
+
+	dir.list_dir_end()
+	return ""
 
 
 ## Tries to find a material file with fallback for naming mismatches.
