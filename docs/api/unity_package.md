@@ -2,10 +2,12 @@
 
 The `unity_package` module handles extraction of Unity `.unitypackage` files and builds GUID mappings for materials and textures.
 
+> **For detailed implementation:** See [Step 3: Extract Unity Package](../steps/03-extract-unity-package.md)
+
 ## Module Location
 
 ```
-synty-converter-BLUE/unity_package.py
+synty-converter/unity_package.py
 ```
 
 ## Usage
@@ -76,6 +78,7 @@ class GuidMap:
     guid_to_pathname: dict[str, str] = field(default_factory=dict)
     guid_to_content: dict[str, bytes] = field(default_factory=dict)
     texture_guid_to_name: dict[str, str] = field(default_factory=dict)
+    texture_guid_to_path: dict[str, Path] = field(default_factory=dict)
 ```
 
 #### Attributes
@@ -85,6 +88,7 @@ class GuidMap:
 | `guid_to_pathname` | `dict[str, str]` | Maps GUID to Unity asset path (e.g., `"Assets/Materials/Crystal.mat"`) |
 | `guid_to_content` | `dict[str, bytes]` | Maps GUID to raw file content (bytes) for `.mat` files only |
 | `texture_guid_to_name` | `dict[str, str]` | Maps texture GUID to texture filename (with extension) |
+| `texture_guid_to_path` | `dict[str, Path]` | Maps texture GUID to temp file Path (for texture extraction from package) |
 
 #### Methods
 
@@ -95,7 +99,7 @@ Returns a summary string of the GuidMap contents.
 ```python
 >>> guid_map = extract_unitypackage(Path("package.unitypackage"))
 >>> print(guid_map)
-GuidMap(pathnames=1523, contents=245, textures=89)
+GuidMap(pathnames=1523, contents=245, textures=89, texture_paths=89)
 ```
 
 #### Example Usage

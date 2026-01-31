@@ -7,6 +7,7 @@ Comprehensive guide to using the Synty Unity-to-Godot Converter.
 - [Installation](#installation)
 - [Understanding Synty Asset Structure](#understanding-synty-asset-structure)
 - [Basic Usage](#basic-usage)
+- [GUI Application](#gui-application)
 - [Command-Line Options](#command-line-options)
 - [Output Structure](#output-structure)
 - [Advanced Usage](#advanced-usage)
@@ -27,7 +28,7 @@ Comprehensive guide to using the Synty Unity-to-Godot Converter.
    python --version
    ```
 
-   The converter uses only Python standard library modules - no pip packages required.
+   The CLI converter uses only Python standard library modules - no pip packages required.
 
 2. **Godot 4.6**
 
@@ -36,6 +37,13 @@ Comprehensive guide to using the Synty Unity-to-Godot Converter.
    Verify Godot is accessible:
    ```bash
    "C:\Godot\Godot_v4.6-stable_mono_win64\Godot_v4.6-stable_mono_win64.exe" --version
+   ```
+
+3. **CustomTkinter (Optional - for GUI only)**
+
+   If you want to use the graphical interface instead of the command line:
+   ```bash
+   pip install customtkinter
    ```
 
 ### Download the Converter
@@ -70,13 +78,13 @@ Contains high-quality source assets:
 
 ```
 SourceFiles/
-  FBX/                 # 3D models ready for import
+  FBX/                 # 3D models ready for import (REQUIRED)
     Characters/
     Environment/
     Props/
     ...
-  Textures/            # High-resolution textures (PNG, TGA)
-    Atlas textures
+  Textures/            # High-resolution textures (OPTIONAL - fallback only)
+    Atlas textures     # Textures are primarily extracted from .unitypackage
     Detail textures
     Normal maps
     ...
@@ -132,6 +140,36 @@ python converter.py \
 
 ---
 
+## GUI Application
+
+The converter includes an optional graphical interface for users who prefer not to use the command line.
+
+### Running the GUI
+
+```bash
+python gui.py
+```
+
+### GUI Features
+
+- **Dark mode interface** with dark-blue color theme
+- **All CLI options** exposed as widgets (path inputs, checkboxes, sliders)
+- **Browse dialogs** for selecting files and directories
+- **Real-time log output** during conversion
+- **Progress indication** with status updates
+- **Help popup** with documentation
+
+### Path Defaults
+
+The GUI comes with sensible Windows defaults:
+- **Synty Assets:** `C:\SyntyComplete`
+- **Godot:** `C:\Godot\Godot_v4.6-stable_mono_win64\Godot_v4.6-stable_mono_win64.exe`
+- **Output:** `C:\Godot\Projects\converted-assets`
+
+For detailed GUI documentation, see [GUI Application](steps/gui.md).
+
+---
+
 ## Command-Line Options
 
 ### Required Arguments
@@ -139,7 +177,7 @@ python converter.py \
 | Flag | Description | Example |
 |------|-------------|---------|
 | `--unity-package` | Path to the .unitypackage file from the Synty pack | `"C:\Synty\Fantasy\Fantasy.unitypackage"` |
-| `--source-files` | Path to the SourceFiles folder (must contain Textures/) | `"C:\Synty\Fantasy\SourceFiles"` |
+| `--source-files` | Path to the SourceFiles folder containing FBX/ (Textures/ optional - textures come from .unitypackage) | `"C:\Synty\Fantasy\SourceFiles"` |
 | `--output` | Output directory for the generated Godot project | `"C:\Godot\Projects\fantasy"` |
 | `--godot` | Path to Godot 4.6 executable | `"C:\Godot\Godot_v4.6.exe"` |
 
@@ -151,6 +189,7 @@ python converter.py \
 | `--verbose` | Off | Enable debug-level logging. Shows detailed shader detection, property mapping, and file operations. |
 | `--skip-fbx-copy` | Off | Skip copying FBX files to output/models/. Use when re-running conversion and models already exist. |
 | `--skip-godot-cli` | Off | Skip running Godot CLI. Generates materials only, no mesh .res files. Useful for debugging material issues. |
+| `--skip-godot-import` | Off | Skip Godot's headless import step. The GDScript converter still runs. Useful for large projects that timeout - open project manually in Godot first. |
 | `--godot-timeout` | 600 | Maximum seconds for Godot CLI operations. Increase for very large packs. |
 | `--keep-meshes-together` | Off | Keep all meshes from one FBX together in a single scene file. Default behavior is to save each mesh as a separate file. |
 | `--mesh-format` | `tscn` | Output format for mesh scenes: `tscn` (text, human-readable) or `res` (binary, more compact). |
@@ -187,24 +226,28 @@ output/
     Environment/
     Props/
     ...
-  meshes/                    # Converted mesh .res files (ready to use!)
+  meshes/                    # Converted mesh .tscn files (ready to use!)
     Characters/
-      SM_Chr_Knight_01.res
+      SM_Chr_Knight_01.tscn
     Environment/
-      SM_Env_Tree_Pine_01_LOD0.res
-      SM_Env_Tree_Pine_01_LOD1.res
+      SM_Env_Tree_Pine_01_LOD0.tscn
+      SM_Env_Tree_Pine_01_LOD1.tscn
     ...
-  mesh_material_mapping.json # Mesh-to-material assignments (intermediate file)
+  shaders/
+    mesh_material_mapping.json  # Mesh-to-material assignments (intermediate file)
+  converter_config.json      # Runtime config for Godot converter (intermediate file)
   conversion_log.txt         # Warnings, errors, statistics
 ```
 
 ### Understanding the Output
 
-**meshes/** - This is what you use in your Godot project. Each .res file is a standalone Mesh resource with materials already baked into surfaces. Drag these directly into your scenes.
+**meshes/** - This is what you use in your Godot project. Each .tscn file is a standalone scene with a MeshInstance3D root node and materials assigned as surface overrides. Drag these directly into your scenes.
 
-**materials/** - ShaderMaterial .tres files. These are automatically assigned to meshes, but you can also use them manually.
+**materials/** - ShaderMaterial .tres files. These are automatically assigned to meshes via external resource references.
 
 **models/** - Raw FBX files. These are used by Godot during import but aren't needed at runtime.
+
+**shaders/** - Contains the drop-in replacement shaders and the intermediate `mesh_material_mapping.json` file.
 
 ---
 
@@ -436,23 +479,22 @@ The converter generates `project.godot` with sensible defaults for global shader
 
 ### 3. Using Converted Meshes
 
-The `meshes/` folder contains ready-to-use Mesh resources:
+The `meshes/` folder contains ready-to-use scene files:
 
 **Method 1: Drag and Drop**
 1. Open the FileSystem panel in Godot
 2. Navigate to `meshes/`
-3. Drag a `.res` file into your 3D scene
+3. Drag a `.tscn` file into your 3D scene
 
-**Method 2: MeshInstance3D**
-1. Create a MeshInstance3D node
-2. In the Inspector, click the Mesh property
-3. Select "Load" and choose a `.res` file
+**Method 2: Instantiate Scene**
+1. Right-click in the Scene panel
+2. Select "Instance Child Scene..."
+3. Navigate to the mesh `.tscn` file
 
 **Method 3: Script**
 ```gdscript
-var mesh = load("res://meshes/Props/SM_Prop_Chest_01.res")
-var instance = MeshInstance3D.new()
-instance.mesh = mesh
+var mesh_scene = load("res://meshes/Props/SM_Prop_Chest_01.tscn")
+var instance = mesh_scene.instantiate()
 add_child(instance)
 ```
 
@@ -460,12 +502,14 @@ add_child(instance)
 
 Meshes with LOD levels are saved as separate files:
 ```
-SM_Env_Tree_Pine_01_LOD0.res  # Highest detail
-SM_Env_Tree_Pine_01_LOD1.res  # Medium detail
-SM_Env_Tree_Pine_01_LOD2.res  # Lowest detail
+SM_Env_Tree_Pine_01_LOD0.tscn  # Highest detail
+SM_Env_Tree_Pine_01_LOD1.tscn  # Medium detail
+SM_Env_Tree_Pine_01_LOD2.tscn  # Lowest detail
 ```
 
 Use Godot's LOD system or manually switch based on distance.
+
+**Note:** When using `--keep-meshes-together`, all LOD meshes from one FBX are saved together in a single combined scene.
 
 ---
 
@@ -477,9 +521,11 @@ Use Godot's LOD system or manually switch based on distance.
 - Verify the path to .unitypackage is correct
 - Use absolute paths to avoid working directory issues
 
-**"Textures directory not found"**
-- The SourceFiles folder must contain a `Textures/` subdirectory
-- Some older packs may have a different structure
+**"Textures directory not found" (informational)**
+- This is now just a warning, not an error
+- Textures are primarily extracted from the .unitypackage file
+- The SourceFiles/Textures directory is used as a fallback source
+- Some packs may not include a separate Textures directory
 
 **"Godot executable not found"**
 - Verify the Godot path is correct

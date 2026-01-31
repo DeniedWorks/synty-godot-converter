@@ -2,6 +2,10 @@
 
 This document covers Godot shader details, output format, and asset handling for the Synty Shader Converter.
 
+**For detailed implementation documentation, see:**
+- [Step 6: Shader Detection](./steps/06-shader-detection.md) - Shader detection algorithm and property mapping
+- [Step 8: Copy Shaders](./steps/08-copy-shaders.md) - Shader deployment process
+
 **Related Documentation:**
 - [Architecture](./architecture.md) - Core architecture and usage
 - [Unity Reference](./unity-reference.md) - Unity parsing details and parameter mapping
@@ -600,5 +604,7 @@ User chooses which variant to use in their scenes.
 
 ## See Also
 
+- [Step 6: Shader Detection](./steps/06-shader-detection.md) - Full detection algorithm and property mapping
+- [Step 8: Copy Shaders](./steps/08-copy-shaders.md) - Shader deployment details
 - [API: Constants](./api/constants.md) - Full property mappings and constant definitions
 - [Troubleshooting](./troubleshooting.md) - Visual issues and common problems

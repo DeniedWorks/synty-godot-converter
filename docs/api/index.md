@@ -1,19 +1,23 @@
 # API Reference
 
+> **Quick Reference Only** - This API documentation provides concise function signatures and brief descriptions. For detailed implementation explanations, see the [Step-by-Step Documentation](../steps/README.md).
+
 ## Overview
 
 The Synty Shader Converter provides a Python API for programmatically converting Unity Synty assets to Godot 4.6 format. The API consists of several modules that work together in a pipeline architecture.
 
 ## Module Summary
 
-| Module | Purpose |
-|--------|---------|
-| [converter](converter.md) | CLI entry point and pipeline orchestration |
-| [unity_package](unity_package.md) | Package extraction and GUID mapping |
-| [unity_parser](unity_parser.md) | Material file parsing (regex-based `.mat` files) |
-| [shader_mapping](shader_mapping.md) | Shader detection and property mapping (core module) |
-| tres_generator | Godot `.tres` file generation |
-| material_list | MaterialList.txt parsing for mesh-material assignments |
+| Module | Purpose | Step Doc |
+|--------|---------|----------|
+| [converter](converter.md) | CLI entry point and pipeline orchestration | [Step 0](../steps/00-cli-orchestration.md) |
+| [unity_package](unity_package.md) | Package extraction and GUID mapping | [Step 3](../steps/03-extract-unity-package.md) |
+| [unity_parser](unity_parser.md) | Material file parsing (regex-based `.mat` files) | [Step 4](../steps/04-parse-materials.md) |
+| [shader_mapping](shader_mapping.md) | Shader detection and property mapping (core module) | [Step 6](../steps/06-shader-detection.md) |
+| [tres_generator](tres_generator.md) | Godot `.tres` file generation | [Step 7](../steps/07-tres-generation.md) |
+| [material_list](material_list.md) | MaterialList.txt parsing for mesh-material assignments | [Step 5](../steps/05-parse-material-list.md) |
+| [godot_converter](godot_converter.md) | GDScript FBX to scene conversion | [Step 12](../steps/12-godot-conversion.md) |
+| [constants](constants.md) | Shader GUID and property mapping reference | [Step 6](../steps/06-shader-detection.md) |
 
 ## Data Flow
 
@@ -187,3 +191,7 @@ logging.basicConfig(level=logging.DEBUG)
 ```
 
 Or use the `--verbose` CLI flag for the converter.
+
+---
+
+*Last Updated: 2026-01-31*

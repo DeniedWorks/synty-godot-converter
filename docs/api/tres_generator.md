@@ -1,5 +1,7 @@
 # TRES Generator API Reference
 
+> **For detailed implementation:** See [Step 7: TRES Generation](../steps/07-tres-generation.md)
+
 ## Overview
 
 The `tres_generator` module generates Godot `.tres` ShaderMaterial resource files from converted materials. It takes `MappedMaterial` objects (produced by the shader mapping system) and outputs properly formatted `.tres` files that can be directly imported by Godot 4.x.
@@ -7,7 +9,7 @@ The `tres_generator` module generates Godot `.tres` ShaderMaterial resource file
 **Key Features:**
 - Generates valid Godot `.tres` format with proper resource structure
 - Handles textures, floats, bools, and colors
-- Auto-enables shader features based on textures present
+- Auto-enables shader features based on textures present (28 rules)
 - Proper number formatting (strips trailing zeros for clean output)
 - Sanitizes material names for filesystem safety
 
@@ -252,7 +254,9 @@ format_color(0.0, 0.0, 0.0, 1.0)   # -> "Color(0.0, 0.0, 0.0, 1.0)"
 
 The generator automatically enables certain shader features when corresponding textures are present. This ensures proper rendering without requiring manual configuration.
 
-### Texture-to-Feature Mappings
+> **Full rule list:** See [Step 7: TRES Generation](../steps/07-tres-generation.md#auto-enable-rules) for all 28 auto-enable rules.
+
+### Common Texture-to-Feature Mappings
 
 | Texture Parameter | Auto-Enabled Feature |
 |------------------|---------------------|
@@ -261,27 +265,25 @@ The generator automatically enables certain shader features when corresponding t
 | `normal_texture` | `enable_normal_texture` |
 | `emission_texture` | `enable_emission_texture` |
 | `ao_texture` | `enable_ambient_occlusion` |
+| `overlay_texture` | `enable_overlay_texture` |
+| `emissive_2_mask`, `trunk_emissive_mask` | `enable_emission` |
+| `emissive_pulse_mask` | `enable_pulse` |
 
 ### Triplanar Texture Detection
 
-Any texture parameter starting with `triplanar_texture_` automatically enables `enable_triplanar_texture`.
+Any texture parameter starting with these prefixes automatically enables the corresponding feature:
+
+```python
+TRIPLANAR_PREFIXES: tuple[str, ...] = (
+    "triplanar_texture_",   # -> enable_triplanar_texture
+    "triplanar_normal_",    # -> enable_triplanar_normals
+    "triplanar_emission_",  # -> enable_triplanar_emission
+)
+```
 
 ### Rule Application
 
 Auto-enabled features are merged with explicitly defined boolean parameters. **Explicit values take precedence** over auto-enabled values, allowing override when needed.
-
-```python
-# Configuration constant in tres_generator.py
-AUTO_ENABLE_RULES: dict[str, str] = {
-    "leaf_normal": "enable_leaf_normal",
-    "trunk_normal": "enable_trunk_normal",
-    "normal_texture": "enable_normal_texture",
-    "emission_texture": "enable_emission_texture",
-    "ao_texture": "enable_ambient_occlusion",
-}
-
-TRIPLANAR_PREFIXES: tuple[str, ...] = ("triplanar_texture_",)
-```
 
 ---
 

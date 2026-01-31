@@ -1,5 +1,7 @@
 # Material List API Reference
 
+> **For detailed implementation:** See [Step 5: Parse MaterialList](../steps/05-parse-material-list.md)
+
 ## Overview
 
 The `material_list` module parses Synty's `MaterialList.txt` files to extract mesh-to-material mappings. These files are found in Synty SourceFiles folders and document which materials are assigned to each mesh surface.

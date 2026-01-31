@@ -2,6 +2,11 @@
 
 Common issues and solutions when using the Synty Unity-to-Godot Converter.
 
+**For detailed implementation context, see:**
+- [Step 3: Extract Unity Package](./steps/03-extract-unity-package.md) - Package extraction details
+- [Step 4: Parse Materials](./steps/04-parse-materials.md) - Material parsing and regex patterns
+- [Step 6: Shader Detection](./steps/06-shader-detection.md) - Shader detection algorithm
+
 ## Table of Contents
 
 - [Installation Issues](#installation-issues)
@@ -580,5 +585,8 @@ The converter applies sensible defaults when properties are missing:
 ## Related Documentation
 
 - [Architecture](architecture.md) - Technical deep dive
-- [Unity Reference](unity-reference.md) - All Unity shader GUIDs and properties
+- [Unity Reference](unity-reference.md) - Unity shader GUIDs and properties
 - [Shader Reference](shader-reference.md) - Godot shader parameters
+- [Step 3: Extract Unity Package](./steps/03-extract-unity-package.md) - Package extraction details
+- [Step 4: Parse Materials](./steps/04-parse-materials.md) - Material parsing implementation
+- [Step 6: Shader Detection](./steps/06-shader-detection.md) - Detection algorithm and property mapping

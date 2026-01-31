@@ -38,7 +38,7 @@ Architecture
 ------------
 The module is organized into several major sections:
 
-1. SHADER_GUID_MAP: Maps 80+ Unity shader GUIDs to 7 Godot shaders
+1. SHADER_GUID_MAP: Maps 56 Unity shader GUIDs to 7 Godot shaders
 2. SHADER_NAME_PATTERNS_SCORED: Fallback pattern matching with scoring
 3. TEXTURE_MAPS: Unity texture property -> Godot parameter mappings
 4. FLOAT_MAPS: Unity float property -> Godot parameter mappings

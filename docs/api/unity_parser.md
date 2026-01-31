@@ -2,10 +2,12 @@
 
 The `unity_parser` module extracts material data from Unity `.mat` files using regex-based parsing.
 
+> **For detailed implementation:** See [Step 4: Parse Materials](../steps/04-parse-materials.md)
+
 ## Module Location
 
 ```
-synty-converter-BLUE/unity_parser.py
+synty-converter/unity_parser.py
 ```
 
 ## Overview

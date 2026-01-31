@@ -2,10 +2,12 @@
 
 The `shader_mapping` module is the **core** of the Synty Shader Converter. It detects Unity shader types and maps Unity material properties to their Godot equivalents.
 
+> **For detailed implementation:** See [Step 6: Shader Detection](../steps/06-shader-detection.md)
+
 ## Module Location
 
 ```
-synty-converter-BLUE/shader_mapping.py
+synty-converter/shader_mapping.py
 ```
 
 ## Overview
@@ -472,7 +474,7 @@ Applies defaults from `SHADER_DEFAULTS` when values are missing.
 def get_all_shader_guids() -> set[str]
 ```
 
-Returns all known shader GUIDs (114 total).
+Returns all known shader GUIDs (56 total).
 
 ---
 
@@ -522,13 +524,88 @@ Get the color property mapping for a specific shader.
 
 ---
 
+### detect_shader_from_name
+
+Detect shader type using only name pattern matching.
+
+```python
+def detect_shader_from_name(material_name: str) -> str | None
+```
+
+Used when `uses_custom_shader=True` in MaterialList. Returns shader filename or `None` if no match (signals logging needed).
+
+#### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `material_name` | `str` | The material name to analyze |
+
+#### Returns
+
+Shader filename if a strong match is found (score >= 20), `None` if no strong match (caller should log for manual review).
+
+#### Example
+
+```python
+>>> detect_shader_from_name("Crystal_Mat_01")
+'crystal.gdshader'
+>>> detect_shader_from_name("Water_River_01")
+'water.gdshader'
+>>> detect_shader_from_name("SomeUnknownMaterial")
+None
+```
+
+---
+
+### determine_shader
+
+Determine shader for a material using the simplified MaterialList-based flow.
+
+```python
+def determine_shader(
+    material_name: str,
+    uses_custom_shader: bool,
+) -> tuple[str, bool]
+```
+
+This is the main entry point for the new detection system. The logic is:
+1. If not a custom shader (`uses_custom_shader=False`), always use polygon
+2. If custom shader, try name pattern matching
+3. If no match, default to polygon but signal for logging
+
+#### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `material_name` | `str` | The material name |
+| `uses_custom_shader` | `bool` | From MaterialList.txt - True if marked "(Uses custom shader)" |
+
+#### Returns
+
+Tuple of `(shader_filename, matched)` where:
+- `shader_filename`: The Godot shader to use
+- `matched`: `False` if the material should be logged for manual review (used to track unmatched custom shader materials)
+
+#### Example
+
+```python
+>>> determine_shader("Ground_Mat", uses_custom_shader=False)
+('polygon.gdshader', True)
+>>> determine_shader("Crystal_Mat_01", uses_custom_shader=True)
+('crystal.gdshader', True)
+>>> determine_shader("UnknownMat", uses_custom_shader=True)
+('polygon.gdshader', False)  # Needs manual review
+```
+
+---
+
 ## Constants Overview
 
 The module contains extensive mapping data. Here is a summary:
 
 ### SHADER_GUID_MAP
 
-Maps 114 Unity shader GUIDs to Godot shaders.
+Maps 44 Unity shader GUIDs to Godot shaders. See [constants.md](constants.md) for the full list.
 
 | Shader Type | Count | Examples |
 |-------------|-------|----------|
@@ -581,11 +658,11 @@ Per-shader color property mappings (50+ total properties across all shaders).
 
 ### ALPHA_FIX_PROPERTIES
 
-Set of 75 color property names that may have the alpha=0 quirk.
+Set of 87 color property names that may have the alpha=0 quirk.
 
 ### BOOLEAN_FLOAT_PROPERTIES
 
-Set of 50 property names that are booleans stored as floats.
+Set of 55 property names that are booleans stored as floats.
 
 ### SHADER_DEFAULTS
 

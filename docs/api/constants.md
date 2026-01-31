@@ -1,5 +1,7 @@
 # Constants Reference
 
+> **For conceptual understanding:** See [Step 6: Shader Detection](../steps/06-shader-detection.md) for how these constants are used in the detection and mapping pipeline.
+
 ## Overview
 
 The `shader_mapping.py` module contains extensive constant dictionaries that drive the material conversion process. These constants handle:
@@ -8,6 +10,12 @@ The `shader_mapping.py` module contains extensive constant dictionaries that dri
 2. **Property Conversion** - Translating Unity material properties to Godot equivalents
 3. **Quirk Handling** - Fixing Unity's alpha=0 colors and boolean-as-float storage
 4. **Default Values** - Sensible defaults when Unity values are missing
+
+**Verified Counts (run `python shader_mapping.py` to confirm):**
+- Known shader GUIDs: **56**
+- Name fallback patterns: **20**
+- Alpha-fix properties: **73**
+- Boolean-float properties: **45**
 
 Understanding these constants is essential for:
 - Adding support for new Synty packages
@@ -18,7 +26,7 @@ Understanding these constants is essential for:
 
 ## SHADER_GUID_MAP
 
-Maps Unity shader GUIDs to Godot shader filenames. Contains **81 entries** based on analysis of 29 Synty Unity packages (~3,300 materials).
+Maps Unity shader GUIDs to Godot shader filenames. Contains **56 entries** based on analysis of 29 Synty Unity packages (~3,300 materials).
 
 ### Quick Lookup (Most Common)
 
@@ -166,7 +174,7 @@ To add support for a new Unity shader:
 
 ## SHADER_NAME_PATTERNS_SCORED
 
-Scoring-based pattern matching used as fallback when GUID lookup fails or maps to the generic polygon shader. Contains **18 pattern groups**.
+Scoring-based pattern matching used as fallback when GUID lookup fails or maps to the generic polygon shader. Contains **20 pattern groups**.
 
 ### How Scoring Works
 
@@ -722,7 +730,7 @@ This is the largest color map with **43 entries**.
 
 Unity stores boolean toggles as floats (0.0 or 1.0). The converter automatically detects these and converts them to proper booleans.
 
-Contains **50 properties** organized by shader type.
+Contains **45 properties** organized by shader type.
 
 ### Foliage Wind Toggles
 
@@ -804,7 +812,7 @@ Contains **50 properties** organized by shader type.
 
 Unity incorrectly stores many colors with alpha=0 even when visible. The converter fixes alpha to 1.0 when RGB has any non-zero value.
 
-Contains **77 properties** in the `ALPHA_FIX_PROPERTIES` set.
+Contains **73 properties** in the `ALPHA_FIX_PROPERTIES` set.
 
 ### Crystal/Refractive
 
@@ -1037,8 +1045,8 @@ When creating placeholder materials for missing references:
 
 | Constant | Entry Count |
 |----------|-------------|
-| `SHADER_GUID_MAP` | 81 |
-| `SHADER_NAME_PATTERNS_SCORED` | 18 |
+| `SHADER_GUID_MAP` | 56 |
+| `SHADER_NAME_PATTERNS_SCORED` | 20 |
 | `TEXTURE_MAP_FOLIAGE` | 8 |
 | `TEXTURE_MAP_POLYGON` | 37 |
 | `TEXTURE_MAP_CRYSTAL` | 4 |
@@ -1058,5 +1066,5 @@ When creating placeholder materials for missing references:
 | `COLOR_MAP_PARTICLES` | 2 |
 | `COLOR_MAP_SKYDOME` | 2 |
 | `COLOR_MAP_CLOUDS` | 6 |
-| `BOOLEAN_FLOAT_PROPERTIES` | 50 |
-| `ALPHA_FIX_PROPERTIES` | 77 |
+| `BOOLEAN_FLOAT_PROPERTIES` | 45 |
+| `ALPHA_FIX_PROPERTIES` | 73 |

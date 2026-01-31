@@ -2,10 +2,12 @@
 
 The `converter` module is the main CLI entry point and pipeline orchestrator for the Synty Shader Converter.
 
+> **For detailed implementation:** See [Step 0: CLI Orchestration](../steps/00-cli-orchestration.md)
+
 ## Module Location
 
 ```
-synty-converter-BLUE/converter.py
+synty-converter/converter.py
 ```
 
 ## Usage
@@ -57,6 +59,10 @@ class ConversionConfig:
     verbose: bool = False
     skip_fbx_copy: bool = False
     skip_godot_cli: bool = False
+    skip_godot_import: bool = False
+    keep_meshes_together: bool = False
+    mesh_format: str = "tscn"
+    filter_pattern: str | None = None
     godot_timeout: int = 600
 ```
 
@@ -72,6 +78,10 @@ class ConversionConfig:
 | `verbose` | `bool` | `False` | Enable verbose/debug logging |
 | `skip_fbx_copy` | `bool` | `False` | Skip copying FBX files (use if `models/` already populated) |
 | `skip_godot_cli` | `bool` | `False` | Skip running Godot CLI (generates materials only, no `.tscn` scenes) |
+| `skip_godot_import` | `bool` | `False` | Skip Godot import phase (only run converter script) |
+| `keep_meshes_together` | `bool` | `False` | Keep all meshes from one FBX in a single scene |
+| `mesh_format` | `str` | `"tscn"` | Output format: `"tscn"` (text) or `"res"` (binary) |
+| `filter_pattern` | `str \| None` | `None` | Only process FBX files matching this pattern |
 | `godot_timeout` | `int` | `600` | Timeout for Godot CLI operations in seconds |
 
 #### Example
@@ -103,6 +113,7 @@ class ConversionStats:
     materials_generated: int = 0
     materials_missing: int = 0
     textures_copied: int = 0
+    textures_fallback: int = 0
     textures_missing: int = 0
     shaders_copied: int = 0
     fbx_copied: int = 0
@@ -122,7 +133,8 @@ class ConversionStats:
 | `materials_parsed` | `int` | Number of Unity materials successfully parsed |
 | `materials_generated` | `int` | Number of Godot `.tres` materials generated |
 | `materials_missing` | `int` | Number of materials referenced by meshes but not found |
-| `textures_copied` | `int` | Number of texture files copied |
+| `textures_copied` | `int` | Number of texture files copied from .unitypackage |
+| `textures_fallback` | `int` | Number of textures copied from SourceFiles/Textures fallback |
 | `textures_missing` | `int` | Number of textures that could not be found |
 | `shaders_copied` | `int` | Number of shader files copied |
 | `fbx_copied` | `int` | Number of FBX files copied |
@@ -176,15 +188,14 @@ def run_conversion(config: ConversionConfig) -> ConversionStats
 2. Create output directory structure
 3. Extract Unity package
 4. Parse all `.mat` files
-5. Detect shaders and map properties
+5. Map shader properties (parses `MaterialList*.txt`, builds shader cache with LOD inheritance)
 6. Generate `.tres` files
 7. Copy `.gdshader` files
 8. Copy required textures
 9. Copy FBX files (unless `skip_fbx_copy=True`)
-10. Parse `MaterialList*.txt` (if exists)
-11. Generate `mesh_material_mapping.json`
-12. Generate `project.godot` with global shader uniforms
-13. Run Godot CLI (unless `skip_godot_cli=True`)
+10. Generate `mesh_material_mapping.json`
+11. Generate `project.godot` with global shader uniforms
+12. Run Godot CLI (unless `skip_godot_cli=True`)
 
 #### Example
 
@@ -260,34 +271,36 @@ def setup_output_directories(output_dir: Path, dry_run: bool) -> None
 
 ```
 output_dir/
-    shaders/
     textures/
     materials/
     models/
     meshes/
 ```
 
+> **Note:** The `shaders/` directory is created separately by `copy_shaders()` at the project root level, not inside the pack output directory.
+
 ---
 
 ### copy_shaders
 
-Copy `.gdshader` files from the project's `shaders/` directory to output.
+Copy `.gdshader` files from the converter's bundled `shaders/` directory to output.
 
 ```python
-def copy_shaders(source_dir: Path, output_dir: Path, dry_run: bool) -> int
+def copy_shaders(shaders_dest: Path, dry_run: bool) -> int
 ```
 
 #### Parameters
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `source_dir` | `Path` | Directory containing the converter project |
-| `output_dir` | `Path` | Output directory (shaders copied to `output_dir/shaders/`) |
+| `shaders_dest` | `Path` | Destination directory for shaders |
 | `dry_run` | `bool` | If `True`, only log what would be copied |
 
 #### Returns
 
 Number of shader files copied (or would be copied in dry run).
+
+> **Note:** Source directory is determined internally from the converter installation path.
 
 ---
 
@@ -300,22 +313,30 @@ def copy_textures(
     source_textures: Path,
     output_textures: Path,
     required: set[str],
-    dry_run: bool
-) -> tuple[int, int]
+    dry_run: bool,
+    fallback_texture: Path | None = None,
+    texture_guid_to_path: dict[str, Path] | None = None,
+    texture_name_to_guid: dict[str, str] | None = None,
+    additional_texture_dirs: list[Path] | None = None,
+) -> tuple[int, int, int]
 ```
 
 #### Parameters
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `source_textures` | `Path` | Source textures directory |
-| `output_textures` | `Path` | Destination textures directory |
-| `required` | `set[str]` | Set of texture names (without extensions) to copy |
-| `dry_run` | `bool` | If `True`, only log what would be copied |
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `source_textures` | `Path` | (required) | Source textures directory |
+| `output_textures` | `Path` | (required) | Destination textures directory |
+| `required` | `set[str]` | (required) | Set of texture names to copy |
+| `dry_run` | `bool` | (required) | If `True`, only log what would be copied |
+| `fallback_texture` | `Path \| None` | `None` | Optional fallback texture for missing files |
+| `texture_guid_to_path` | `dict[str, Path] \| None` | `None` | GUID to temp file path mapping (from .unitypackage) |
+| `texture_name_to_guid` | `dict[str, str] \| None` | `None` | Texture name to GUID reverse mapping |
+| `additional_texture_dirs` | `list[Path] \| None` | `None` | Additional directories to search |
 
 #### Returns
 
-Tuple of `(textures_copied, textures_missing)`.
+Tuple of `(textures_copied, textures_fallback, textures_missing)`.
 
 ---
 
@@ -327,17 +348,21 @@ Copy FBX files from `SourceFiles/FBX` to output, preserving directory structure.
 def copy_fbx_files(
     source_fbx_dir: Path,
     output_models_dir: Path,
-    dry_run: bool
+    dry_run: bool,
+    filter_pattern: str | None = None,
+    additional_fbx_dirs: list[Path] | None = None,
 ) -> tuple[int, int]
 ```
 
 #### Parameters
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `source_fbx_dir` | `Path` | Path to `SourceFiles/FBX` directory |
-| `output_models_dir` | `Path` | Path to `output/models` directory |
-| `dry_run` | `bool` | If `True`, only log what would be copied |
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `source_fbx_dir` | `Path` | (required) | Path to `SourceFiles/FBX` directory |
+| `output_models_dir` | `Path` | (required) | Path to `output/models` directory |
+| `dry_run` | `bool` | (required) | If `True`, only log what would be copied |
+| `filter_pattern` | `str \| None` | `None` | Optional filter pattern for FBX filenames (case-insensitive) |
+| `additional_fbx_dirs` | `list[Path] \| None` | `None` | Additional FBX directories to search (for nested structures) |
 
 #### Returns
 
@@ -354,18 +379,26 @@ def run_godot_cli(
     godot_exe: Path,
     project_dir: Path,
     timeout_seconds: int,
-    dry_run: bool
+    dry_run: bool,
+    skip_import: bool = False,
+    keep_meshes_together: bool = False,
+    mesh_format: str = "tscn",
+    filter_pattern: str | None = None,
 ) -> tuple[bool, bool, bool]
 ```
 
 #### Parameters
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `godot_exe` | `Path` | Path to Godot 4.6 executable |
-| `project_dir` | `Path` | Path to the Godot project directory |
-| `timeout_seconds` | `int` | Maximum time for each phase |
-| `dry_run` | `bool` | If `True`, only log what would be executed |
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `godot_exe` | `Path` | (required) | Path to Godot 4.6 executable |
+| `project_dir` | `Path` | (required) | Path to the Godot project directory |
+| `timeout_seconds` | `int` | (required) | Maximum time for each phase |
+| `dry_run` | `bool` | (required) | If `True`, only log what would be executed |
+| `skip_import` | `bool` | `False` | Skip Godot import phase (manual import required) |
+| `keep_meshes_together` | `bool` | `False` | Keep all meshes from one FBX in single scene |
+| `mesh_format` | `str` | `"tscn"` | Output format: `"tscn"` or `"res"` |
+| `filter_pattern` | `str \| None` | `None` | Optional FBX filename filter pattern |
 
 #### Returns
 
