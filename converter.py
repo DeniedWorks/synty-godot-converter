@@ -99,91 +99,27 @@ def has_source_assets_recursive(path: Path) -> bool:
 
 
 def resolve_source_files_path(source_files: Path) -> Path:
-    """Resolve the actual SourceFiles path, handling nested folder structures.
+    """Validate and return the source files path.
 
-    Synty packs use various naming conventions for source file folders:
-    - SourceFiles (no space)
-    - Source Files (with space)
-    - Source_Files (with underscore)
-
-    Synty packs sometimes have nested structures like:
-        POLYGON_PackName_SourceFiles_v2/
-            SourceFiles/
-                FBX/
-                Textures/
-                MaterialList*.txt
-
-    Or complex multi-folder structures like Dwarven Dungeon:
-        SourceFiles/
-            DwarvenDungeon/
-                FBX/
-                MaterialList_PolygonMapsDwarfDungeon.txt
-                Textures/
-            Generic/
-                MaterialList_PolygonGeneric.txt
-                Models/
-                Textures/
-
-    This function checks if the given path contains usable assets (MaterialList,
-    FBX, or Textures) anywhere in its tree. If not found at the root level,
-    looks for a nested SourceFiles folder.
+    Since all file discovery is now recursive, users can point to any folder
+    containing Synty assets and the converter will find MaterialList*.txt,
+    FBX/, and Textures/ folders anywhere in the tree.
 
     Args:
         source_files: Path provided by the user as --source-files argument.
 
     Returns:
-        The resolved path to the SourceFiles directory. If the path has assets
-        anywhere in its tree (even nested), returns the original path. If a
-        nested SourceFiles folder is found with assets, returns that path.
-        Otherwise, returns the original path (which will fail validation later
-        with a clear error message).
-
-    Example:
-        >>> # User points to outer folder
-        >>> resolve_source_files_path(Path("POLYGON_Forest_SourceFiles_v2"))
-        Path("POLYGON_Forest_SourceFiles_v2/SourceFiles")  # Nested folder found
-
-        >>> # User points to correct folder
-        >>> resolve_source_files_path(Path("PolygonNature/SourceFiles"))
-        Path("PolygonNature/SourceFiles")  # Already correct
-
-        >>> # Complex nested structure (Dwarven Dungeon)
-        >>> resolve_source_files_path(Path("DwarvenDungeon/SourceFiles"))
-        Path("DwarvenDungeon/SourceFiles")  # Has assets in subdirs
+        The source files path as-is. If the path does not exist or has no
+        assets, it will fail validation later with a clear error message.
     """
-    # Check if current path has assets at root level (simple structure)
-    if (source_files / "FBX").exists() or (source_files / "Textures").exists():
-        return source_files
+    if not source_files.exists():
+        return source_files  # Will fail validation with clear error
 
-    # Check if current path has assets anywhere in tree (complex nested structure)
     if has_source_assets_recursive(source_files):
-        logger.info(
-            "Detected complex nested structure with assets in subdirectories: %s",
-            source_files
-        )
         return source_files
 
-    # Look for nested folders with various naming conventions
-    variants = ["SourceFiles", "Source Files", "Source_Files"]
-    for variant in variants:
-        nested = source_files / variant
-        if nested.exists():
-            # Check for assets at root level of nested folder
-            if (nested / "FBX").exists() or (nested / "Textures").exists():
-                logger.info(
-                    "Detected nested source files folder ('%s'), using: %s",
-                    variant, nested
-                )
-                return nested
-            # Check for assets anywhere in nested folder's tree
-            if has_source_assets_recursive(nested):
-                logger.info(
-                    "Detected nested source files folder with complex structure ('%s'), using: %s",
-                    variant, nested
-                )
-                return nested
-
-    # Return original path (will fail validation later with clear error)
+    # Log warning if no assets found
+    logger.warning("No MaterialList, FBX, or Textures found in: %s", source_files)
     return source_files
 
 
