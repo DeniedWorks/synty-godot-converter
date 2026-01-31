@@ -1601,7 +1601,11 @@ def detect_shader_type(
 # PROPERTY CONVERSION HELPERS
 # =============================================================================
 
-def _fix_alpha_zero(color: Color, property_name: str) -> Color:
+def _fix_alpha_zero(
+    color: Color,
+    property_name: str,
+    floats: dict[str, float] | None = None
+) -> Color:
     """Fix Unity's alpha=0 color quirk for specific properties.
 
     Unity often stores colors with alpha=0 even when the material is opaque.
@@ -1618,9 +1622,14 @@ def _fix_alpha_zero(color: Color, property_name: str) -> Color:
     not in the list retain their original alpha (for intentional transparency
     like glass tint, particle fade colors, etc.)
 
+    IMPORTANT: Materials using transparency modes (Cutout=1, Fade=2, Transparent=3)
+    are skipped entirely - their low alpha values are intentional.
+
     Args:
         color: Color with potentially incorrect alpha value.
         property_name: Unity property name to check against ALPHA_FIX_PROPERTIES.
+        floats: Optional dict of material float properties. If provided and
+            contains _Mode >= 1, alpha fix is skipped (transparent material).
 
     Returns:
         New Color with corrected alpha if property is in fix list and has
@@ -1644,7 +1653,22 @@ def _fix_alpha_zero(color: Color, property_name: str) -> Color:
         >>> fixed = _fix_alpha_zero(color, "_Color")
         >>> fixed.a
         0.0
+
+        >>> # Transparent material (_Mode >= 1) - alpha preserved
+        >>> color = Color(0.5, 0.3, 0.2, 0.3)
+        >>> fixed = _fix_alpha_zero(color, "_Color", {"_Mode": 2.0})
+        >>> fixed.a
+        0.3
     """
+    # Skip alpha fix for transparent materials (_Mode: 1=Cutout, 2=Fade, 3=Transparent)
+    # These materials have intentionally low alpha values
+    if floats is not None and floats.get("_Mode", 0) >= 1.0:
+        logger.debug(
+            "Skipping alpha fix for property %s (transparent material, _Mode=%s)",
+            property_name, floats.get("_Mode")
+        )
+        return color
+
     if property_name in ALPHA_FIX_PROPERTIES:
         if color.a == 0.0 and color.has_rgb():
             logger.debug(
@@ -1966,12 +1990,12 @@ def map_material(
     # Step 4: Map floats (splitting out booleans)
     mapped_floats, mapped_bools = _convert_boolean_floats(material.floats, float_map)
 
-    # Step 5: Map colors (with alpha fix)
+    # Step 5: Map colors (with alpha fix, but preserve alpha for transparent materials)
     mapped_colors: dict[str, tuple[float, float, float, float]] = {}
     for unity_name, color in material.colors.items():
         if unity_name in color_map:
             godot_name = color_map[unity_name]
-            fixed_color = _fix_alpha_zero(color, unity_name)
+            fixed_color = _fix_alpha_zero(color, unity_name, material.floats)
             mapped_colors[godot_name] = fixed_color.as_tuple()
 
     # Create mapped material
