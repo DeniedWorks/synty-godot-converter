@@ -253,9 +253,12 @@ func process_pack_folder(pack_folder: String) -> void:
 		print("  No FBX files found in %s" % models_path)
 		return
 
-	print("  Found %d FBX file(s) to process" % fbx_files.size())
+	var total_fbx := fbx_files.size()
+	print("  Found %d FBX file(s) to process" % total_fbx)
 
-	for fbx_path in fbx_files:
+	for i in range(fbx_files.size()):
+		var fbx_path := fbx_files[i]
+		print("[%d/%d] Processing: %s" % [i + 1, total_fbx, fbx_path.get_file()])
 		process_fbx_file(fbx_path)
 
 

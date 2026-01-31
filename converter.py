@@ -1250,29 +1250,60 @@ def run_godot_cli(
 
         try:
             start_time = time.time()
-            result = subprocess.run(
+
+            # Use Popen to stream output in real-time for progress display
+            process = subprocess.Popen(
                 convert_cmd,
                 cwd=project_dir,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=timeout_seconds,
+                bufsize=1,  # Line buffered
             )
-            elapsed = time.time() - start_time
 
-            if result.returncode == 0:
-                logger.debug("Godot converter completed in %.1fs", elapsed)
-                convert_success = True
+            # Read stdout lines as they come for real-time progress
+            stdout_lines: list[str] = []
+            while True:
+                # Check for timeout
+                elapsed = time.time() - start_time
+                if elapsed > timeout_seconds:
+                    process.kill()
+                    logger.error("Godot converter timed out after %ds", timeout_seconds)
+                    timeout_occurred = True
+                    break
 
-                # Log output for debugging
-                if result.stdout:
-                    for line in result.stdout.strip().split("\n"):
-                        logger.debug("Godot: %s", line)
-            else:
-                logger.error("Godot converter failed (exit code %d)", result.returncode)
-                if result.stderr:
-                    logger.error("Stderr: %s", result.stderr[:1000])
-                if result.stdout:
-                    logger.error("Stdout: %s", result.stdout[:1000])
+                line = process.stdout.readline()
+                if not line:
+                    # No more output, check if process finished
+                    if process.poll() is not None:
+                        break
+                    continue
+
+                line = line.rstrip()
+                stdout_lines.append(line)
+
+                # Display progress lines (format: [N/M] Processing: filename.fbx)
+                if line.startswith("[") and "] Processing:" in line:
+                    logger.info("Godot: %s", line)
+                else:
+                    logger.debug("Godot: %s", line)
+
+            # Get any remaining stderr
+            stderr_output = process.stderr.read() if process.stderr else ""
+
+            if not timeout_occurred:
+                elapsed = time.time() - start_time
+                returncode = process.returncode
+
+                if returncode == 0:
+                    logger.debug("Godot converter completed in %.1fs", elapsed)
+                    convert_success = True
+                else:
+                    logger.error("Godot converter failed (exit code %d)", returncode)
+                    if stderr_output:
+                        logger.error("Stderr: %s", stderr_output[:1000])
+                    if stdout_lines:
+                        logger.error("Stdout (last 10 lines): %s", "\n".join(stdout_lines[-10:]))
 
         except subprocess.TimeoutExpired:
             logger.error("Godot converter timed out after %ds", timeout_seconds)
