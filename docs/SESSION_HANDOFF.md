@@ -1,8 +1,62 @@
 # Synty Converter - Session Handoff Document
 
-**Last Updated:** 2026-01-30
+**Last Updated:** 2026-01-31
 **Project:** `C:\Godot\Projects\synty-converter\`
 **Purpose:** Convert Unity Synty asset packs to Godot 4.6 projects with proper materials, shaders, and scene files.
+
+---
+
+## Session 2026-01-31 - GUI & Quality of Life Improvements
+
+### 1. Modern GUI Created
+- CustomTkinter dark-mode GUI (`gui.py`)
+- Features: path inputs, segmented buttons for options, live log, progress bar
+- Centered window, clean layout without tabs
+- PyInstaller packaging (`synty_converter.spec`, `build_exe.bat`)
+
+### 2. New CLI Options Added
+- `--skip-godot-import`: Skip Godot's headless import (avoids timeout on large projects)
+- `--keep-meshes-together`: Keep all meshes from one FBX in single scene
+- `--mesh-format [tscn|res]`: Choose output format
+- `--filter PATTERN`: Only convert files matching pattern
+
+### 3. Recursive Folder Discovery
+- Recursively finds all MaterialList*.txt files
+- Recursively finds all FBX and Models directories
+- Recursively finds all Textures directories
+- Handles complex pack structures like Dwarven Dungeon
+- Users can point to any folder - converter finds everything
+
+### 4. Textures Now Optional
+- Textures primarily come from .unitypackage extraction
+- SourceFiles/Textures is optional fallback
+- No validation error if Textures folder missing
+
+### 5. Logging Improvements
+- Fixed duplicate log lines in GUI
+- Non-verbose mode now shows clean step-by-step output
+- Verbose mode shows detailed per-file operations
+- Skip missing materials check in dry run mode
+
+### 6. Material Fallback Improvements (from earlier)
+- `find_material_path()` strips Polygon*_Mat_ prefixes
+- `_try_material_fallbacks()` handles SK_->SM_, _Static, _Preset, sub-components
+- Default material fallback for truly unmapped meshes
+
+## Current State
+- All changes committed and pushed to GitHub
+- GUI fully functional
+- Converter handles all Synty pack structures
+
+## Key Files
+- `gui.py` - GUI application
+- `converter.py` - Main converter with all improvements
+- `godot_converter.gd` - GDScript mesh converter with fallbacks
+
+## What's Next
+- Test on more packs
+- Build standalone exe with PyInstaller
+- Address any edge cases that come up
 
 ---
 
