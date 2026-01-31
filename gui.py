@@ -380,7 +380,7 @@ class SyntyConverterApp:
         self.timeout_value_label.pack(side="left")
 
         # Spacer between timeout and checkboxes
-        spacer_frame = ctk.CTkFrame(advanced_frame, fg_color="transparent", height=30)
+        spacer_frame = ctk.CTkFrame(advanced_frame, fg_color="transparent", height=45)
         spacer_frame.pack(fill="x")
         spacer_frame.pack_propagate(False)
 
