@@ -5,7 +5,6 @@ Synty Shader Converter - GUI Application
 A modern CustomTkinter-based GUI for converting Unity Synty assets to Godot 4.6 format.
 Provides a user-friendly interface for the command-line converter with:
 - Pack browser to discover available Synty packs
-- Drag & drop support for .unitypackage files
 - Real-time conversion log output
 - All CLI parameters exposed as GUI widgets
 
@@ -13,12 +12,11 @@ Usage:
     python gui.py
 
 Requirements:
-    pip install -r requirements-gui.txt
+    pip install customtkinter
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import queue
 import re
@@ -29,7 +27,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox
-from typing import Callable
 
 # Third-party imports
 try:
@@ -38,13 +35,9 @@ except ImportError:
     print("ERROR: customtkinter not installed. Run: pip install customtkinter")
     sys.exit(1)
 
-try:
-    from tkinterdnd2 import DND_FILES, TkinterDnD
-except ImportError:
-    print("WARNING: tkinterdnd2 not installed. Drag & drop will be disabled.")
-    print("Install with: pip install tkinterdnd2")
-    TkinterDnD = None
-    DND_FILES = None
+# Set appearance mode and color theme BEFORE creating any widgets
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("dark-blue")
 
 # Local imports - ensure we can find the converter module
 script_dir = Path(__file__).parent
@@ -55,10 +48,10 @@ from converter import ConversionConfig, ConversionStats, run_conversion
 
 # --- Constants ---
 
-APP_TITLE = "Synty Shader Converter"
+APP_TITLE = "SYNTY CONVERTER"
 APP_VERSION = "1.0.0"
-DEFAULT_WINDOW_SIZE = "1200x800"
-MIN_WINDOW_SIZE = (900, 600)
+DEFAULT_WINDOW_SIZE = "1100x850"
+MIN_WINDOW_SIZE = (900, 700)
 
 # Default paths
 DEFAULT_SYNTY_PATH = r"C:\SyntyComplete"
@@ -67,6 +60,36 @@ DEFAULT_OUTPUT_PATH = r"C:\Godot\Projects\converted-assets"
 
 # Logging queue check interval (ms)
 LOG_QUEUE_INTERVAL = 50
+
+# Help text for the Info popup
+HELP_TEXT = """=== SYNTY CONVERTER HELP ===
+
+PATHS:
+- Unity Package: The .unitypackage file from Synty
+- Source Files: The SourceFiles folder containing FBX and textures
+- Output Directory: Where the converted Godot project will be created
+- Godot Executable: Path to Godot 4.6+ executable
+
+OUTPUT OPTIONS:
+- Scene Mode:
+  - "One scene per mesh": Each mesh becomes its own .tscn file (default)
+  - "Combined scene per FBX": All meshes from one FBX stay together
+- Output Format:
+  - tscn: Human-readable scene files
+  - res: Compiled binary (smaller, faster to load)
+
+FILTERS:
+- Filter by Name: Only convert files containing this text
+  Example: "Tree" converts only tree-related assets
+
+ADVANCED:
+- Verbose: Show detailed logging
+- Dry run: Preview what would happen without writing files
+- Skip FBX copy: Don't copy FBX files (use if already copied)
+- Skip Godot CLI: Generate materials only, no mesh conversion
+- Skip Godot import: Skip Godot's import step (manual import needed)
+- Godot Timeout: How long to wait for Godot operations
+"""
 
 
 # --- Custom Logging Handler ---
@@ -160,15 +183,8 @@ class SyntyConverterApp:
     """Main GUI application class."""
 
     def __init__(self):
-        # Use TkinterDnD if available for drag & drop support
-        if TkinterDnD:
-            self.root = TkinterDnD.Tk()
-        else:
-            self.root = tk.Tk()
-
-        # Apply CustomTkinter styling to the root window
-        ctk.set_appearance_mode("dark")
-        ctk.set_default_color_theme("blue")
+        # Create the root window
+        self.root = ctk.CTk()
 
         self.root.title(f"{APP_TITLE} v{APP_VERSION}")
         self.root.geometry(DEFAULT_WINDOW_SIZE)
@@ -180,6 +196,7 @@ class SyntyConverterApp:
         self.conversion_thread: threading.Thread | None = None
         self.conversion_cancelled = threading.Event()
         self.log_queue: queue.Queue = queue.Queue()
+        self.pack_browser_visible = True
 
         # Track conversion stats for display
         self.current_stats: ConversionStats | None = None
@@ -194,44 +211,86 @@ class SyntyConverterApp:
     def _create_widgets(self):
         """Create all GUI widgets."""
         # Main container using grid layout
-        self.root.grid_columnconfigure(1, weight=1)
-        self.root.grid_rowconfigure(0, weight=1)
+        self.root.grid_columnconfigure(0, weight=0)  # Pack browser (collapsible)
+        self.root.grid_columnconfigure(1, weight=1)  # Main content
+        self.root.grid_columnconfigure(2, weight=1)  # Log panel
+        self.root.grid_rowconfigure(1, weight=1)
 
-        # Left panel - Pack Browser (fixed width)
+        # Header bar
+        self._create_header()
+
+        # Left panel - Pack Browser (collapsible)
         self._create_pack_browser()
 
-        # Center panel - Conversion Setup (expandable)
-        self._create_conversion_setup()
+        # Center panel - Main settings (scrollable)
+        self._create_main_panel()
 
-        # Right panel - Log Output (fixed width)
+        # Right panel - Log Output
         self._create_log_panel()
 
         # Bottom bar - Progress and controls
         self._create_bottom_bar()
 
-    def _create_pack_browser(self):
-        """Create the left panel with pack browser."""
-        left_frame = ctk.CTkFrame(self.root, width=280)
-        left_frame.grid(row=0, column=0, sticky="nsew", padx=(10, 5), pady=10)
-        left_frame.grid_propagate(False)
+    def _create_header(self):
+        """Create the header bar with title and help button."""
+        header_frame = ctk.CTkFrame(self.root, height=50)
+        header_frame.grid(row=0, column=0, columnspan=3, sticky="ew", padx=10, pady=(10, 5))
+        header_frame.grid_propagate(False)
 
         # Title
         title_label = ctk.CTkLabel(
-            left_frame,
-            text="Pack Browser",
-            font=ctk.CTkFont(size=16, weight="bold")
+            header_frame,
+            text=APP_TITLE,
+            font=ctk.CTkFont(size=20, weight="bold")
         )
-        title_label.pack(pady=(10, 5), padx=10)
+        title_label.pack(side="left", padx=15, pady=10)
+
+        # Help button
+        help_btn = ctk.CTkButton(
+            header_frame,
+            text="?",
+            width=35,
+            height=35,
+            font=ctk.CTkFont(size=16, weight="bold"),
+            command=self._show_help
+        )
+        help_btn.pack(side="right", padx=15, pady=7)
+
+    def _create_pack_browser(self):
+        """Create the left panel with pack browser."""
+        self.left_frame = ctk.CTkFrame(self.root, width=250)
+        self.left_frame.grid(row=1, column=0, sticky="nsew", padx=(10, 5), pady=5)
+        self.left_frame.grid_propagate(False)
+
+        # Toggle button for collapse/expand
+        toggle_frame = ctk.CTkFrame(self.left_frame, fg_color="transparent")
+        toggle_frame.pack(fill="x", padx=5, pady=5)
+
+        self.toggle_btn = ctk.CTkButton(
+            toggle_frame,
+            text="Pack Browser",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            fg_color="transparent",
+            hover_color=("gray75", "gray25"),
+            anchor="w",
+            command=self._toggle_pack_browser
+        )
+        self.toggle_btn.pack(side="left", fill="x", expand=True)
+
+        # Collapsible content frame
+        self.pack_content_frame = ctk.CTkFrame(self.left_frame, fg_color="transparent")
+        self.pack_content_frame.pack(fill="both", expand=True, padx=5)
 
         # Scan directory entry
-        scan_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
-        scan_frame.pack(fill="x", padx=10, pady=5)
+        scan_frame = ctk.CTkFrame(self.pack_content_frame, fg_color="transparent")
+        scan_frame.pack(fill="x", pady=5)
 
         self.scan_path_var = ctk.StringVar(value=DEFAULT_SYNTY_PATH)
         scan_entry = ctk.CTkEntry(
             scan_frame,
             textvariable=self.scan_path_var,
-            placeholder_text="Path to Synty packs..."
+            placeholder_text="Path to Synty packs...",
+            height=28
         )
         scan_entry.pack(side="left", fill="x", expand=True)
 
@@ -239,39 +298,41 @@ class SyntyConverterApp:
             scan_frame,
             text="...",
             width=30,
+            height=28,
             command=self._browse_scan_directory
         )
         browse_btn.pack(side="right", padx=(5, 0))
 
         # Scan button
         scan_btn = ctk.CTkButton(
-            left_frame,
+            self.pack_content_frame,
             text="Scan for Packs",
+            height=28,
             command=self._scan_for_packs
         )
-        scan_btn.pack(fill="x", padx=10, pady=5)
+        scan_btn.pack(fill="x", pady=5)
 
         # Pack list with checkboxes
-        self.pack_list_frame = ctk.CTkScrollableFrame(left_frame)
-        self.pack_list_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        self.pack_list_frame = ctk.CTkScrollableFrame(self.pack_content_frame, height=200)
+        self.pack_list_frame.pack(fill="both", expand=True, pady=5)
 
         # Pack info label
         self.pack_info_label = ctk.CTkLabel(
-            left_frame,
+            self.pack_content_frame,
             text="No packs scanned",
-            font=ctk.CTkFont(size=11),
+            font=ctk.CTkFont(size=10),
             text_color="gray"
         )
-        self.pack_info_label.pack(pady=(0, 5), padx=10)
+        self.pack_info_label.pack(pady=(0, 5))
 
         # Select all / none buttons
-        select_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
-        select_frame.pack(fill="x", padx=10, pady=(0, 10))
+        select_frame = ctk.CTkFrame(self.pack_content_frame, fg_color="transparent")
+        select_frame.pack(fill="x", pady=(0, 5))
 
         select_all_btn = ctk.CTkButton(
             select_frame,
-            text="Select All",
-            width=80,
+            text="All",
+            width=60,
             height=25,
             command=self._select_all_packs
         )
@@ -279,262 +340,240 @@ class SyntyConverterApp:
 
         select_none_btn = ctk.CTkButton(
             select_frame,
-            text="Select None",
-            width=80,
+            text="None",
+            width=60,
             height=25,
             command=self._select_no_packs
         )
         select_none_btn.pack(side="right")
 
-    def _create_conversion_setup(self):
-        """Create the center panel with conversion setup options."""
-        center_frame = ctk.CTkFrame(self.root)
-        center_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=10)
-
-        # Title
-        title_label = ctk.CTkLabel(
-            center_frame,
-            text="Conversion Setup",
-            font=ctk.CTkFont(size=16, weight="bold")
+        autofill_btn = ctk.CTkButton(
+            self.pack_content_frame,
+            text="Auto-fill from Selected",
+            height=28,
+            command=self._autofill_from_selection
         )
-        title_label.pack(pady=(10, 5))
+        autofill_btn.pack(fill="x", pady=(0, 5))
 
-        # Tabview for organized settings
-        self.tabview = ctk.CTkTabview(center_frame)
-        self.tabview.pack(fill="both", expand=True, padx=10, pady=5)
+    def _create_main_panel(self):
+        """Create the center panel with all settings on a single scrollable screen."""
+        center_frame = ctk.CTkScrollableFrame(self.root)
+        center_frame.grid(row=1, column=1, sticky="nsew", padx=5, pady=5)
 
-        # Create tabs
-        self._create_required_tab()
-        self._create_options_tab()
-        self._create_advanced_tab()
+        # === PATHS SECTION ===
+        self._create_section_header(center_frame, "PATHS")
 
-    def _create_required_tab(self):
-        """Create the Required tab with essential paths."""
-        tab = self.tabview.add("Required")
-        tab.grid_columnconfigure(1, weight=1)
-
-        row = 0
-
-        # Drop zone for .unitypackage
-        drop_frame = ctk.CTkFrame(tab, height=100, border_width=2, border_color="gray40")
-        drop_frame.grid(row=row, column=0, columnspan=3, sticky="ew", padx=10, pady=10)
-        drop_frame.grid_propagate(False)
-
-        self.drop_label = ctk.CTkLabel(
-            drop_frame,
-            text="Drag & drop .unitypackage file here\nor use Browse below",
-            font=ctk.CTkFont(size=13),
-            text_color="gray60"
-        )
-        self.drop_label.place(relx=0.5, rely=0.5, anchor="center")
-
-        # Enable drag & drop if available
-        if TkinterDnD and DND_FILES:
-            drop_frame.drop_target_register(DND_FILES)
-            drop_frame.dnd_bind("<<Drop>>", self._on_drop)
-            drop_frame.dnd_bind("<<DragEnter>>", self._on_drag_enter)
-            drop_frame.dnd_bind("<<DragLeave>>", self._on_drag_leave)
-        else:
-            self.drop_label.configure(
-                text="Drag & drop not available\nUse Browse button below"
-            )
-
-        row += 1
+        paths_frame = ctk.CTkFrame(center_frame, fg_color="transparent")
+        paths_frame.pack(fill="x", padx=10, pady=(0, 15))
+        paths_frame.grid_columnconfigure(1, weight=1)
 
         # Unity Package path
-        pkg_label = ctk.CTkLabel(tab, text="Unity Package:")
-        pkg_label.grid(row=row, column=0, sticky="w", padx=10, pady=5)
+        row = 0
+        pkg_label = ctk.CTkLabel(paths_frame, text="Unity Package:", anchor="w", width=120)
+        pkg_label.grid(row=row, column=0, sticky="w", pady=5)
 
         self.unity_package_var = ctk.StringVar()
-        pkg_entry = ctk.CTkEntry(tab, textvariable=self.unity_package_var)
+        pkg_entry = ctk.CTkEntry(paths_frame, textvariable=self.unity_package_var)
         pkg_entry.grid(row=row, column=1, sticky="ew", padx=5, pady=5)
 
         pkg_browse = ctk.CTkButton(
-            tab, text="Browse", width=70,
+            paths_frame, text="Browse", width=70,
             command=lambda: self._browse_file(
                 self.unity_package_var,
                 "Select Unity Package",
                 [("Unity Package", "*.unitypackage"), ("All Files", "*.*")]
             )
         )
-        pkg_browse.grid(row=row, column=2, padx=(0, 10), pady=5)
-
-        row += 1
+        pkg_browse.grid(row=row, column=2, pady=5)
 
         # Source Files path
-        src_label = ctk.CTkLabel(tab, text="Source Files:")
-        src_label.grid(row=row, column=0, sticky="w", padx=10, pady=5)
+        row += 1
+        src_label = ctk.CTkLabel(paths_frame, text="Source Files:", anchor="w", width=120)
+        src_label.grid(row=row, column=0, sticky="w", pady=5)
 
         self.source_files_var = ctk.StringVar()
-        src_entry = ctk.CTkEntry(tab, textvariable=self.source_files_var)
+        src_entry = ctk.CTkEntry(paths_frame, textvariable=self.source_files_var)
         src_entry.grid(row=row, column=1, sticky="ew", padx=5, pady=5)
 
         src_browse = ctk.CTkButton(
-            tab, text="Browse", width=70,
+            paths_frame, text="Browse", width=70,
             command=lambda: self._browse_directory(
                 self.source_files_var,
                 "Select SourceFiles Directory"
             )
         )
-        src_browse.grid(row=row, column=2, padx=(0, 10), pady=5)
-
-        row += 1
+        src_browse.grid(row=row, column=2, pady=5)
 
         # Output directory
-        out_label = ctk.CTkLabel(tab, text="Output Directory:")
-        out_label.grid(row=row, column=0, sticky="w", padx=10, pady=5)
+        row += 1
+        out_label = ctk.CTkLabel(paths_frame, text="Output Directory:", anchor="w", width=120)
+        out_label.grid(row=row, column=0, sticky="w", pady=5)
 
         self.output_dir_var = ctk.StringVar(value=DEFAULT_OUTPUT_PATH)
-        out_entry = ctk.CTkEntry(tab, textvariable=self.output_dir_var)
+        out_entry = ctk.CTkEntry(paths_frame, textvariable=self.output_dir_var)
         out_entry.grid(row=row, column=1, sticky="ew", padx=5, pady=5)
 
         out_browse = ctk.CTkButton(
-            tab, text="Browse", width=70,
+            paths_frame, text="Browse", width=70,
             command=lambda: self._browse_directory(
                 self.output_dir_var,
                 "Select Output Directory"
             )
         )
-        out_browse.grid(row=row, column=2, padx=(0, 10), pady=5)
-
-        row += 1
+        out_browse.grid(row=row, column=2, pady=5)
 
         # Godot executable
-        godot_label = ctk.CTkLabel(tab, text="Godot Executable:")
-        godot_label.grid(row=row, column=0, sticky="w", padx=10, pady=5)
+        row += 1
+        godot_label = ctk.CTkLabel(paths_frame, text="Godot Executable:", anchor="w", width=120)
+        godot_label.grid(row=row, column=0, sticky="w", pady=5)
 
         self.godot_exe_var = ctk.StringVar(value=DEFAULT_GODOT_PATH)
-        godot_entry = ctk.CTkEntry(tab, textvariable=self.godot_exe_var)
+        godot_entry = ctk.CTkEntry(paths_frame, textvariable=self.godot_exe_var)
         godot_entry.grid(row=row, column=1, sticky="ew", padx=5, pady=5)
 
         godot_browse = ctk.CTkButton(
-            tab, text="Browse", width=70,
+            paths_frame, text="Browse", width=70,
             command=lambda: self._browse_file(
                 self.godot_exe_var,
                 "Select Godot Executable",
                 [("Executable", "*.exe"), ("All Files", "*.*")]
             )
         )
-        godot_browse.grid(row=row, column=2, padx=(0, 10), pady=5)
+        godot_browse.grid(row=row, column=2, pady=5)
 
-        row += 1
+        # === OUTPUT OPTIONS SECTION ===
+        self._create_section_header(center_frame, "OUTPUT OPTIONS")
 
-        # Auto-fill from pack selection button
-        autofill_btn = ctk.CTkButton(
-            tab,
-            text="Auto-fill from Selected Pack",
-            command=self._autofill_from_selection
+        output_frame = ctk.CTkFrame(center_frame, fg_color="transparent")
+        output_frame.pack(fill="x", padx=10, pady=(0, 15))
+
+        # Scene Mode (radio buttons)
+        scene_label = ctk.CTkLabel(output_frame, text="Scene Mode:", anchor="w")
+        scene_label.grid(row=0, column=0, sticky="w", pady=5)
+
+        self.scene_mode_var = ctk.IntVar(value=0)  # 0 = one per mesh, 1 = combined
+
+        radio_frame = ctk.CTkFrame(output_frame, fg_color="transparent")
+        radio_frame.grid(row=0, column=1, sticky="w", padx=10, pady=5)
+
+        radio_separate = ctk.CTkRadioButton(
+            radio_frame,
+            text="One scene per mesh (default)",
+            variable=self.scene_mode_var,
+            value=0
         )
-        autofill_btn.grid(row=row, column=0, columnspan=3, pady=20)
+        radio_separate.pack(anchor="w")
 
-    def _create_options_tab(self):
-        """Create the Options tab with common settings."""
-        tab = self.tabview.add("Options")
-
-        # Checkbox options
-        options_frame = ctk.CTkFrame(tab, fg_color="transparent")
-        options_frame.pack(fill="x", padx=10, pady=10)
-
-        # Verbose logging
-        self.verbose_var = ctk.BooleanVar(value=False)
-        verbose_cb = ctk.CTkCheckBox(
-            options_frame,
-            text="Verbose Logging",
-            variable=self.verbose_var
+        radio_combined = ctk.CTkRadioButton(
+            radio_frame,
+            text="Combined scene per FBX file",
+            variable=self.scene_mode_var,
+            value=1
         )
-        verbose_cb.grid(row=0, column=0, sticky="w", pady=5)
+        radio_combined.pack(anchor="w")
 
-        # Dry run
-        self.dry_run_var = ctk.BooleanVar(value=False)
-        dry_run_cb = ctk.CTkCheckBox(
-            options_frame,
-            text="Dry Run (preview only)",
-            variable=self.dry_run_var
-        )
-        dry_run_cb.grid(row=1, column=0, sticky="w", pady=5)
+        # Output Format (dropdown)
+        format_label = ctk.CTkLabel(output_frame, text="Output Format:", anchor="w")
+        format_label.grid(row=1, column=0, sticky="w", pady=5)
 
-        # Skip FBX copy
-        self.skip_fbx_var = ctk.BooleanVar(value=False)
-        skip_fbx_cb = ctk.CTkCheckBox(
-            options_frame,
-            text="Skip FBX Copy",
-            variable=self.skip_fbx_var
-        )
-        skip_fbx_cb.grid(row=2, column=0, sticky="w", pady=5)
-
-        # Skip Godot CLI
-        self.skip_godot_cli_var = ctk.BooleanVar(value=False)
-        skip_cli_cb = ctk.CTkCheckBox(
-            options_frame,
-            text="Skip Godot CLI",
-            variable=self.skip_godot_cli_var
-        )
-        skip_cli_cb.grid(row=3, column=0, sticky="w", pady=5)
-
-        # Skip Godot import
-        self.skip_godot_import_var = ctk.BooleanVar(value=False)
-        skip_import_cb = ctk.CTkCheckBox(
-            options_frame,
-            text="Skip Godot Import (run converter script only)",
-            variable=self.skip_godot_import_var
-        )
-        skip_import_cb.grid(row=4, column=0, sticky="w", pady=5)
-
-        # Keep meshes together
-        self.keep_meshes_var = ctk.BooleanVar(value=False)
-        keep_meshes_cb = ctk.CTkCheckBox(
-            options_frame,
-            text="Keep Meshes Together (single scene per FBX)",
-            variable=self.keep_meshes_var
-        )
-        keep_meshes_cb.grid(row=0, column=1, sticky="w", padx=20, pady=5)
-
-        # Mesh format selection
-        format_label = ctk.CTkLabel(options_frame, text="Mesh Format:")
-        format_label.grid(row=1, column=1, sticky="w", padx=20, pady=5)
+        format_inner = ctk.CTkFrame(output_frame, fg_color="transparent")
+        format_inner.grid(row=1, column=1, sticky="w", padx=10, pady=5)
 
         self.mesh_format_var = ctk.StringVar(value="tscn")
         format_menu = ctk.CTkOptionMenu(
-            options_frame,
+            format_inner,
             variable=self.mesh_format_var,
             values=["tscn", "res"],
             width=100
         )
-        format_menu.grid(row=1, column=2, sticky="w", pady=5)
+        format_menu.pack(side="left")
 
-        # Filter pattern
-        filter_frame = ctk.CTkFrame(tab, fg_color="transparent")
-        filter_frame.pack(fill="x", padx=10, pady=10)
+        format_hint = ctk.CTkLabel(
+            format_inner,
+            text="(tscn = text, res = binary)",
+            text_color="gray",
+            font=ctk.CTkFont(size=11)
+        )
+        format_hint.pack(side="left", padx=10)
 
-        filter_label = ctk.CTkLabel(filter_frame, text="Filter Pattern:")
+        # === FILTERS SECTION ===
+        self._create_section_header(center_frame, "FILTERS")
+
+        filter_frame = ctk.CTkFrame(center_frame, fg_color="transparent")
+        filter_frame.pack(fill="x", padx=10, pady=(0, 15))
+
+        filter_label = ctk.CTkLabel(filter_frame, text="Filter by Name:", anchor="w")
         filter_label.pack(side="left")
 
         self.filter_var = ctk.StringVar()
         filter_entry = ctk.CTkEntry(
             filter_frame,
             textvariable=self.filter_var,
-            placeholder_text="e.g., Tree, Chr, Veh (case-insensitive)",
-            width=250
+            placeholder_text='e.g. "Tree" or "Veh"',
+            width=200
         )
         filter_entry.pack(side="left", padx=10)
 
-        filter_help = ctk.CTkLabel(
-            filter_frame,
-            text="Only process FBX files containing this pattern",
-            text_color="gray60",
-            font=ctk.CTkFont(size=11)
+        # === ADVANCED OPTIONS SECTION ===
+        self._create_section_header(center_frame, "ADVANCED OPTIONS")
+
+        advanced_frame = ctk.CTkFrame(center_frame, fg_color="transparent")
+        advanced_frame.pack(fill="x", padx=10, pady=(0, 15))
+
+        # Checkbox grid
+        checkbox_frame = ctk.CTkFrame(advanced_frame, fg_color="transparent")
+        checkbox_frame.pack(fill="x")
+
+        # Verbose logging
+        self.verbose_var = ctk.BooleanVar(value=False)
+        verbose_cb = ctk.CTkCheckBox(
+            checkbox_frame,
+            text="Verbose logging",
+            variable=self.verbose_var
         )
-        filter_help.pack(side="left")
+        verbose_cb.grid(row=0, column=0, sticky="w", pady=3, padx=(0, 20))
 
-    def _create_advanced_tab(self):
-        """Create the Advanced tab with timeout and other settings."""
-        tab = self.tabview.add("Advanced")
+        # Dry run
+        self.dry_run_var = ctk.BooleanVar(value=False)
+        dry_run_cb = ctk.CTkCheckBox(
+            checkbox_frame,
+            text="Dry run (preview only)",
+            variable=self.dry_run_var
+        )
+        dry_run_cb.grid(row=0, column=1, sticky="w", pady=3)
 
-        # Godot timeout
-        timeout_frame = ctk.CTkFrame(tab, fg_color="transparent")
-        timeout_frame.pack(fill="x", padx=10, pady=10)
+        # Skip FBX copy
+        self.skip_fbx_var = ctk.BooleanVar(value=False)
+        skip_fbx_cb = ctk.CTkCheckBox(
+            checkbox_frame,
+            text="Skip FBX copy",
+            variable=self.skip_fbx_var
+        )
+        skip_fbx_cb.grid(row=1, column=0, sticky="w", pady=3, padx=(0, 20))
 
-        timeout_label = ctk.CTkLabel(timeout_frame, text="Godot Timeout (seconds):")
+        # Skip Godot CLI
+        self.skip_godot_cli_var = ctk.BooleanVar(value=False)
+        skip_cli_cb = ctk.CTkCheckBox(
+            checkbox_frame,
+            text="Skip Godot CLI",
+            variable=self.skip_godot_cli_var
+        )
+        skip_cli_cb.grid(row=1, column=1, sticky="w", pady=3)
+
+        # Skip Godot import
+        self.skip_godot_import_var = ctk.BooleanVar(value=False)
+        skip_import_cb = ctk.CTkCheckBox(
+            checkbox_frame,
+            text="Skip Godot import",
+            variable=self.skip_godot_import_var
+        )
+        skip_import_cb.grid(row=2, column=0, sticky="w", pady=3, padx=(0, 20))
+
+        # Godot timeout slider
+        timeout_frame = ctk.CTkFrame(advanced_frame, fg_color="transparent")
+        timeout_frame.pack(fill="x", pady=(10, 0))
+
+        timeout_label = ctk.CTkLabel(timeout_frame, text="Godot Timeout:")
         timeout_label.pack(side="left")
 
         self.timeout_var = ctk.IntVar(value=600)
@@ -551,55 +590,38 @@ class SyntyConverterApp:
 
         self.timeout_value_label = ctk.CTkLabel(
             timeout_frame,
-            text="600s (10 min)",
-            width=100
+            text="600s",
+            width=60
         )
         self.timeout_value_label.pack(side="left")
 
-        # Help text
-        help_frame = ctk.CTkFrame(tab, fg_color="transparent")
-        help_frame.pack(fill="x", padx=10, pady=20)
+    def _create_section_header(self, parent, title: str):
+        """Create a section header with a title."""
+        header_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        header_frame.pack(fill="x", padx=10, pady=(15, 5))
 
-        help_text = """Advanced Options Help:
+        # Separator line before title
+        separator = ctk.CTkFrame(header_frame, height=1, fg_color="gray40")
+        separator.pack(fill="x", pady=(0, 5))
 
-- Godot Timeout: Maximum time for Godot CLI operations.
-  Increase for large packs with many FBX files.
-
-- Filter Pattern: Only convert FBX files matching the pattern.
-  Useful for testing or converting specific asset types.
-
-- Skip Options:
-  - Skip FBX Copy: Use if models/ already populated from a previous run
-  - Skip Godot CLI: Generate materials only, no mesh .tscn files
-  - Skip Godot Import: Skip Godot's import phase (must open project manually first)
-
-- Keep Meshes Together: By default, each mesh is saved as a separate scene.
-  Enable this to keep all meshes from one FBX in a single scene file.
-
-- Mesh Format:
-  - tscn: Text format, human-readable, larger files
-  - res: Binary format, smaller files, faster to load
-"""
-        help_label = ctk.CTkLabel(
-            help_frame,
-            text=help_text,
-            justify="left",
-            font=ctk.CTkFont(size=11),
+        label = ctk.CTkLabel(
+            header_frame,
+            text=f"=== {title} ===",
+            font=ctk.CTkFont(size=13, weight="bold"),
             text_color="gray70"
         )
-        help_label.pack(anchor="w")
+        label.pack(anchor="w")
 
     def _create_log_panel(self):
         """Create the right panel with log output."""
-        right_frame = ctk.CTkFrame(self.root, width=350)
-        right_frame.grid(row=0, column=2, sticky="nsew", padx=(5, 10), pady=10)
-        right_frame.grid_propagate(False)
+        right_frame = ctk.CTkFrame(self.root)
+        right_frame.grid(row=1, column=2, sticky="nsew", padx=(5, 10), pady=5)
 
         # Title
         title_label = ctk.CTkLabel(
             right_frame,
-            text="Conversion Log",
-            font=ctk.CTkFont(size=16, weight="bold")
+            text="Live Log Output",
+            font=ctk.CTkFont(size=14, weight="bold")
         )
         title_label.pack(pady=(10, 5))
 
@@ -619,51 +641,30 @@ class SyntyConverterApp:
 
         clear_btn = ctk.CTkButton(
             btn_frame,
-            text="Clear Log",
-            width=80,
+            text="Clear",
+            width=70,
+            height=28,
             command=self._clear_log
         )
         clear_btn.pack(side="left")
 
         copy_btn = ctk.CTkButton(
             btn_frame,
-            text="Copy Log",
-            width=80,
+            text="Copy",
+            width=70,
+            height=28,
             command=self._copy_log
         )
         copy_btn.pack(side="right")
 
-        # Stats display
-        stats_frame = ctk.CTkFrame(right_frame)
-        stats_frame.pack(fill="x", padx=10, pady=(5, 10))
-
-        self.stats_labels = {}
-        stats = [
-            ("Materials:", "materials"),
-            ("Textures:", "textures"),
-            ("Meshes:", "meshes"),
-        ]
-
-        for i, (label_text, key) in enumerate(stats):
-            label = ctk.CTkLabel(stats_frame, text=label_text, font=ctk.CTkFont(size=11))
-            label.grid(row=i, column=0, sticky="w", padx=5, pady=2)
-
-            value_label = ctk.CTkLabel(
-                stats_frame,
-                text="-",
-                font=ctk.CTkFont(size=11, weight="bold")
-            )
-            value_label.grid(row=i, column=1, sticky="w", padx=5, pady=2)
-            self.stats_labels[key] = value_label
-
     def _create_bottom_bar(self):
         """Create the bottom bar with progress and control buttons."""
         bottom_frame = ctk.CTkFrame(self.root)
-        bottom_frame.grid(row=1, column=0, columnspan=3, sticky="ew", padx=10, pady=(0, 10))
+        bottom_frame.grid(row=2, column=0, columnspan=3, sticky="ew", padx=10, pady=(5, 10))
 
         # Progress bar
         self.progress_bar = ctk.CTkProgressBar(bottom_frame)
-        self.progress_bar.pack(fill="x", padx=10, pady=10)
+        self.progress_bar.pack(fill="x", padx=10, pady=(10, 5))
         self.progress_bar.set(0)
 
         # Progress label
@@ -680,9 +681,9 @@ class SyntyConverterApp:
 
         self.convert_btn = ctk.CTkButton(
             btn_frame,
-            text="Start Conversion",
+            text="Convert",
             font=ctk.CTkFont(size=14, weight="bold"),
-            width=150,
+            width=120,
             height=40,
             command=self._start_conversion
         )
@@ -700,7 +701,62 @@ class SyntyConverterApp:
         )
         self.cancel_btn.pack(side="left", padx=10)
 
+        info_btn = ctk.CTkButton(
+            btn_frame,
+            text="Info",
+            width=80,
+            height=40,
+            fg_color="gray50",
+            hover_color="gray40",
+            command=self._show_help
+        )
+        info_btn.pack(side="left", padx=10)
+
     # --- Event Handlers ---
+
+    def _show_help(self):
+        """Show the help popup window."""
+        help_window = ctk.CTkToplevel(self.root)
+        help_window.title("Synty Converter Help")
+        help_window.geometry("550x500")
+        help_window.resizable(False, False)
+
+        # Make it modal
+        help_window.transient(self.root)
+        help_window.grab_set()
+
+        # Help text
+        text_box = ctk.CTkTextbox(help_window, wrap="word")
+        text_box.pack(fill="both", expand=True, padx=15, pady=15)
+        text_box.insert("1.0", HELP_TEXT)
+        text_box.configure(state="disabled")
+
+        # Close button
+        close_btn = ctk.CTkButton(
+            help_window,
+            text="Close",
+            width=100,
+            command=help_window.destroy
+        )
+        close_btn.pack(pady=(0, 15))
+
+        # Center the window
+        help_window.update_idletasks()
+        x = self.root.winfo_x() + (self.root.winfo_width() - help_window.winfo_width()) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - help_window.winfo_height()) // 2
+        help_window.geometry(f"+{x}+{y}")
+
+    def _toggle_pack_browser(self):
+        """Toggle the pack browser visibility."""
+        if self.pack_browser_visible:
+            self.pack_content_frame.pack_forget()
+            self.toggle_btn.configure(text="Pack Browser [+]")
+            self.left_frame.configure(width=120)
+        else:
+            self.pack_content_frame.pack(fill="both", expand=True, padx=5)
+            self.toggle_btn.configure(text="Pack Browser")
+            self.left_frame.configure(width=250)
+        self.pack_browser_visible = not self.pack_browser_visible
 
     def _browse_scan_directory(self):
         """Open directory browser for scan path."""
@@ -732,43 +788,6 @@ class SyntyConverterApp:
         if path:
             var.set(path)
 
-    def _on_drop(self, event):
-        """Handle drag & drop of .unitypackage files."""
-        # Parse the dropped file path
-        path = event.data
-        # Handle paths with curly braces (TkDND format for paths with spaces)
-        if path.startswith("{") and path.endswith("}"):
-            path = path[1:-1]
-
-        # Check if it's a .unitypackage file
-        if path.lower().endswith(".unitypackage"):
-            self.unity_package_var.set(path)
-            self._log_message(f"Dropped: {Path(path).name}")
-
-            # Try to auto-detect source files
-            package_dir = Path(path).parent
-            source_files = package_dir / "SourceFiles"
-            if source_files.exists():
-                self.source_files_var.set(str(source_files))
-                self._log_message(f"Auto-detected SourceFiles: {source_files}")
-        else:
-            self._log_message("Please drop a .unitypackage file", level="WARNING")
-
-        # Reset drop zone appearance
-        self.drop_label.configure(
-            text="Drag & drop .unitypackage file here\nor use Browse below"
-        )
-
-    def _on_drag_enter(self, event):
-        """Handle drag enter event."""
-        self.drop_label.configure(text="Drop .unitypackage here!")
-
-    def _on_drag_leave(self, event):
-        """Handle drag leave event."""
-        self.drop_label.configure(
-            text="Drag & drop .unitypackage file here\nor use Browse below"
-        )
-
     def _scan_for_packs(self):
         """Scan the specified directory for Synty packs."""
         scan_path = Path(self.scan_path_var.get())
@@ -796,34 +815,18 @@ class SyntyConverterApp:
 
             # Create a frame for pack info
             pack_frame = ctk.CTkFrame(self.pack_list_frame, fg_color="transparent")
-            pack_frame.pack(fill="x", pady=2)
+            pack_frame.pack(fill="x", pady=1)
 
             cb = ctk.CTkCheckBox(
                 pack_frame,
-                text=pack.name,
+                text=pack.name[:25] + "..." if len(pack.name) > 25 else pack.name,
                 variable=var,
-                font=ctk.CTkFont(size=12)
+                font=ctk.CTkFont(size=11)
             )
             cb.pack(side="left", anchor="w")
 
-            # Status indicators
-            status = ""
-            if pack.has_material_list:
-                status += "M"
-            if pack.has_fbx:
-                status += "F"
-
-            if status:
-                status_label = ctk.CTkLabel(
-                    pack_frame,
-                    text=f"[{status}]",
-                    font=ctk.CTkFont(size=10),
-                    text_color="gray60"
-                )
-                status_label.pack(side="right", padx=5)
-
         self.pack_info_label.configure(
-            text=f"Found {len(self.discovered_packs)} packs (M=MaterialList, F=FBX)"
+            text=f"Found {len(self.discovered_packs)} packs"
         )
 
     def _select_all_packs(self):
@@ -863,11 +866,7 @@ class SyntyConverterApp:
     def _update_timeout_label(self, value):
         """Update the timeout value label."""
         seconds = int(float(value))
-        if seconds >= 60:
-            minutes = seconds // 60
-            self.timeout_value_label.configure(text=f"{seconds}s ({minutes} min)")
-        else:
-            self.timeout_value_label.configure(text=f"{seconds}s")
+        self.timeout_value_label.configure(text=f"{seconds}s")
 
     def _clear_log(self):
         """Clear the log text area."""
@@ -965,6 +964,9 @@ class SyntyConverterApp:
             return
 
         # Build configuration
+        # scene_mode_var: 0 = one per mesh (keep_meshes_together=False), 1 = combined (keep_meshes_together=True)
+        keep_meshes_together = self.scene_mode_var.get() == 1
+
         config = ConversionConfig(
             unity_package=Path(self.unity_package_var.get()),
             source_files=Path(self.source_files_var.get()),
@@ -976,7 +978,7 @@ class SyntyConverterApp:
             skip_godot_cli=self.skip_godot_cli_var.get(),
             skip_godot_import=self.skip_godot_import_var.get(),
             godot_timeout=self.timeout_var.get(),
-            keep_meshes_together=self.keep_meshes_var.get(),
+            keep_meshes_together=keep_meshes_together,
             mesh_format=self.mesh_format_var.get(),
             filter_pattern=self.filter_var.get() if self.filter_var.get() else None,
         )
@@ -989,10 +991,6 @@ class SyntyConverterApp:
         self.progress_bar.start()
         self.progress_label.configure(text="Converting...")
 
-        # Clear previous stats
-        for label in self.stats_labels.values():
-            label.configure(text="-")
-
         # Reset cancellation flag
         self.conversion_cancelled.clear()
 
@@ -1004,9 +1002,9 @@ class SyntyConverterApp:
         )
         self.conversion_thread.start()
 
-        self._log_message("=" * 50)
+        self._log_message("=" * 40)
         self._log_message(f"Starting conversion: {config.unity_package.name}")
-        self._log_message("=" * 50)
+        self._log_message("=" * 40)
 
     def _run_conversion_thread(self, config: ConversionConfig):
         """Run the conversion in a background thread."""
@@ -1044,19 +1042,8 @@ class SyntyConverterApp:
             return
 
         if stats:
-            # Update stats display
-            self.stats_labels["materials"].configure(
-                text=f"{stats.materials_generated} generated, {stats.materials_missing} missing"
-            )
-            self.stats_labels["textures"].configure(
-                text=f"{stats.textures_copied} copied, {stats.textures_missing} missing"
-            )
-            self.stats_labels["meshes"].configure(
-                text=f"{stats.meshes_converted} converted"
-            )
-
             # Log summary
-            self._log_message("=" * 50)
+            self._log_message("=" * 40)
             self._log_message("Conversion Complete!")
             self._log_message(f"  Materials: {stats.materials_generated} generated")
             self._log_message(f"  Textures: {stats.textures_copied} copied")
@@ -1070,7 +1057,7 @@ class SyntyConverterApp:
             if stats.warnings:
                 self._log_message(f"  Warnings: {len(stats.warnings)}", level="WARNING")
 
-            self._log_message("=" * 50)
+            self._log_message("=" * 40)
 
             if stats.errors:
                 self.progress_label.configure(text="Completed with errors")
