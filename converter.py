@@ -66,6 +66,11 @@ logger = logging.getLogger(__name__)
 def resolve_source_files_path(source_files: Path) -> Path:
     """Resolve the actual SourceFiles path, handling nested folder structures.
 
+    Synty packs use various naming conventions for source file folders:
+    - SourceFiles (no space)
+    - Source Files (with space)
+    - Source_Files (with underscore)
+
     Synty packs sometimes have nested structures like:
         POLYGON_PackName_SourceFiles_v2/
             SourceFiles/
@@ -81,7 +86,7 @@ def resolve_source_files_path(source_files: Path) -> Path:
 
     This function checks if the given path contains the expected structure
     (FBX/ or Textures/ subdirectories), and if not, looks for a nested
-    SourceFiles folder that does.
+    SourceFiles folder (trying all naming variants) that does.
 
     Args:
         source_files: Path provided by the user as --source-files argument.
@@ -106,14 +111,16 @@ def resolve_source_files_path(source_files: Path) -> Path:
     if (source_files / "FBX").exists() or (source_files / "Textures").exists():
         return source_files
 
-    # Look for nested SourceFiles folder
-    nested = source_files / "SourceFiles"
-    if nested.exists() and ((nested / "FBX").exists() or (nested / "Textures").exists()):
-        logger.info(
-            "Detected nested SourceFiles folder structure, using: %s",
-            nested
-        )
-        return nested
+    # Look for nested folders with various naming conventions
+    variants = ["SourceFiles", "Source Files", "Source_Files"]
+    for variant in variants:
+        nested = source_files / variant
+        if nested.exists() and ((nested / "FBX").exists() or (nested / "Textures").exists()):
+            logger.info(
+                "Detected nested source files folder ('%s'), using: %s",
+                variant, nested
+            )
+            return nested
 
     # Return original path (will fail validation later with clear error)
     return source_files
