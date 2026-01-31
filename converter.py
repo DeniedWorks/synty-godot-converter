@@ -191,6 +191,10 @@ class ConversionConfig:
             Use this if the models/ directory is already populated.
         skip_godot_cli: If True, skip Godot CLI conversion phase. This generates
             materials only without producing .tscn scene files.
+        skip_godot_import: If True, skip Godot's headless import step but still
+            run the GDScript converter. Useful for large projects where the
+            import step times out. You'll need to open the project in Godot
+            manually to trigger asset import before running the converter.
         godot_timeout: Timeout in seconds for Godot CLI operations. Each phase
             (import and convert) has this timeout applied separately.
 
@@ -213,6 +217,7 @@ class ConversionConfig:
     verbose: bool = False
     skip_fbx_copy: bool = False
     skip_godot_cli: bool = False
+    skip_godot_import: bool = False
     godot_timeout: int = 600
 
 
@@ -357,6 +362,13 @@ Examples:
         help="Skip running Godot CLI (generates materials only, no .tscn scene files)",
     )
     parser.add_argument(
+        "--skip-godot-import",
+        action="store_true",
+        help="Skip Godot's headless import step (useful for large projects that timeout). "
+             "The GDScript converter will still run. You'll need to open the project in "
+             "Godot manually to trigger asset import before running the converter.",
+    )
+    parser.add_argument(
         "--godot-timeout",
         type=int,
         default=600,
@@ -388,6 +400,7 @@ Examples:
         verbose=args.verbose,
         skip_fbx_copy=args.skip_fbx_copy,
         skip_godot_cli=args.skip_godot_cli,
+        skip_godot_import=args.skip_godot_import,
         godot_timeout=args.godot_timeout,
     )
 
@@ -854,6 +867,7 @@ def run_godot_cli(
     project_dir: Path,
     timeout_seconds: int,
     dry_run: bool,
+    skip_import: bool = False,
 ) -> tuple[bool, bool, bool]:
     """Run Godot CLI in two phases: import and convert.
 
@@ -864,6 +878,9 @@ def run_godot_cli(
         Runs: godot --headless --import --path <project_dir>
         This triggers Godot's asset import system to process all FBX files
         in the models/ directory, generating .import files and .scn resources.
+        Can be skipped with skip_import=True for large projects where the
+        import step times out. In that case, open the project in Godot manually
+        to trigger asset import before running the converter.
 
     Phase 2 - Convert:
         Runs: godot --headless --script res://godot_converter.gd --path <project_dir>
@@ -880,10 +897,14 @@ def run_godot_cli(
         timeout_seconds: Maximum time in seconds for each phase. If exceeded,
             the subprocess is terminated and timeout_occurred is set True.
         dry_run: If True, only log what would be executed without running Godot.
+        skip_import: If True, skip the import phase and only run the converter
+            script. Useful for large projects where Godot's headless import
+            times out. The user must open the project in Godot manually first.
 
     Returns:
         Tuple of (import_success, convert_success, timeout_occurred) where:
-        - import_success: True if Phase 1 completed with exit code 0
+        - import_success: True if Phase 1 completed with exit code 0, or True
+          if Phase 1 was skipped via skip_import
         - convert_success: True if Phase 2 completed with exit code 0
         - timeout_occurred: True if either phase exceeded the timeout
 
@@ -926,51 +947,56 @@ def run_godot_cli(
     convert_success = False
     timeout_occurred = False
 
-    # Phase 1: Import
-    import_cmd = [
-        str(godot_exe),
-        "--headless",
-        "--import",
-        "--path", str(project_dir),
-    ]
-
-    if dry_run:
-        logger.info("[DRY RUN] Would run: %s", " ".join(import_cmd))
-        import_success = True
+    # Phase 1: Import (can be skipped for large projects that timeout)
+    if skip_import:
+        logger.info("Skipping Godot import phase (--skip-godot-import)")
+        logger.info("Note: You must open the project in Godot manually to trigger asset import")
+        import_success = True  # Treat as success so converter phase runs
     else:
-        logger.info("Running Godot import (timeout: %ds)...", timeout_seconds)
-        logger.debug("Command: %s", " ".join(import_cmd))
+        import_cmd = [
+            str(godot_exe),
+            "--headless",
+            "--import",
+            "--path", str(project_dir),
+        ]
 
-        try:
-            start_time = time.time()
-            result = subprocess.run(
-                import_cmd,
-                cwd=project_dir,
-                capture_output=True,
-                text=True,
-                timeout=timeout_seconds,
-            )
-            elapsed = time.time() - start_time
+        if dry_run:
+            logger.info("[DRY RUN] Would run: %s", " ".join(import_cmd))
+            import_success = True
+        else:
+            logger.info("Running Godot import (timeout: %ds)...", timeout_seconds)
+            logger.debug("Command: %s", " ".join(import_cmd))
 
-            if result.returncode == 0:
-                logger.info("Godot import completed in %.1fs", elapsed)
-                import_success = True
-            else:
-                logger.error("Godot import failed (exit code %d)", result.returncode)
-                if result.stderr:
-                    logger.error("Stderr: %s", result.stderr[:1000])
+            try:
+                start_time = time.time()
+                result = subprocess.run(
+                    import_cmd,
+                    cwd=project_dir,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout_seconds,
+                )
+                elapsed = time.time() - start_time
 
-        except subprocess.TimeoutExpired:
-            logger.error("Godot import timed out after %ds", timeout_seconds)
-            timeout_occurred = True
+                if result.returncode == 0:
+                    logger.info("Godot import completed in %.1fs", elapsed)
+                    import_success = True
+                else:
+                    logger.error("Godot import failed (exit code %d)", result.returncode)
+                    if result.stderr:
+                        logger.error("Stderr: %s", result.stderr[:1000])
+
+            except subprocess.TimeoutExpired:
+                logger.error("Godot import timed out after %ds", timeout_seconds)
+                timeout_occurred = True
+                return import_success, convert_success, timeout_occurred
+
+            except Exception as e:
+                logger.error("Failed to run Godot import: %s", e)
+                return import_success, convert_success, timeout_occurred
+
+        if not import_success and not dry_run:
             return import_success, convert_success, timeout_occurred
-
-        except Exception as e:
-            logger.error("Failed to run Godot import: %s", e)
-            return import_success, convert_success, timeout_occurred
-
-    if not import_success and not dry_run:
-        return import_success, convert_success, timeout_occurred
 
     # Phase 2: Convert
     convert_cmd = [
@@ -1697,6 +1723,7 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
                 project_dir,
                 config.godot_timeout,
                 config.dry_run,
+                skip_import=config.skip_godot_import,
             )
 
             # Count generated .tscn files
