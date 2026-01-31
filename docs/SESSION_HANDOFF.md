@@ -6,7 +6,32 @@
 
 ---
 
-## What Was Done This Session (2026-01-30)
+## What Was Done This Session (2026-01-30 Continued)
+
+### 1. Committed Material Name Fallback (bff21a8)
+- Added `find_material_path()` function with prefix stripping fallback
+- Fixed `FileAccess.file_exists()` -> `ResourceLoader.exists()` for res:// paths
+- Fantasy Kingdom: 511 -> 171 meshes without materials
+
+### 2. Pushed to GitHub
+- All changes pushed to https://github.com/DeniedWorks/synty-godot-converter
+
+### 3. Analyzed 162 Unmapped Meshes
+Breakdown of remaining meshes without materials:
+- **75 SK_ skeletal meshes** - Need SK_ -> SM_ conversion
+- **16 _Preset variants** - Composite/preset materials not in base MaterialList
+- **13 sub-component parts** - _Cork, _Liquid, _Handle, etc. (parts of larger meshes)
+- **11 _Static variants** - Static versions not in MaterialList
+- **47 without clear base** - FX meshes, truly undocumented materials
+
+### 4. Implemented Mesh Variant Fallback (a4b9548)
+- Added `_try_material_fallbacks()` function in `godot_converter.gd`
+- Handles SK_ to SM_ conversion, _Static suffix, _Preset suffix, sub-component suffixes
+- Expected to fix ~115 of the 162 unmapped meshes
+
+---
+
+## What Was Done Earlier This Session (2026-01-30)
 
 ### 1. Shader Property Validation (COMMITTED: 14243a7)
 
@@ -57,7 +82,7 @@ If `_Mode >= 1`, we skip the alpha fix and preserve the original alpha value. Th
 - Materials with `_Mode >= 1` now preserve original alpha values
 - This fixes glass, windows, cutout leaves, and fade particles appearing opaque
 
-### 3. Material Name Fallback (IN PROGRESS - needs commit)
+### 3. Material Name Fallback (COMMITTED: bff21a8)
 
 **Location:** `godot_converter.gd`
 
@@ -85,6 +110,27 @@ Added a fallback chain in `godot_converter.gd` that tries multiple name variatio
 - Uses regex to strip pack-specific prefixes: `r"^Polygon[A-Za-z]+_(Mat_)?"`
 - Result: Fantasy Kingdom improved from 511 meshes without materials to only 171 (edge cases)
 
+### 4. Mesh Variant Fallback (COMMITTED: a4b9548)
+
+**Location:** `godot_converter.gd`
+
+**THE PROBLEM:**
+After the material name fallback, 162 meshes still had no materials. Analysis showed these fall into categories:
+- SK_ skeletal meshes (MaterialList uses SM_ prefix)
+- _Static variants (not listed separately in MaterialList)
+- _Preset composite meshes
+- Sub-component parts (_Cork, _Liquid, _Handle, etc.)
+
+**THE SOLUTION:**
+Added `_try_material_fallbacks()` function that tries mesh name variations to find matching materials:
+
+1. **SK_ to SM_ conversion** - `SK_Chr_Knight` tries `SM_Chr_Knight`
+2. **Strip _Static suffix** - `SM_Wall_Static` tries `SM_Wall`
+3. **Strip _Preset suffix** - `SM_Weapon_Preset` tries `SM_Weapon`
+4. **Strip sub-component suffixes** - `SM_Bottle_Cork` tries `SM_Bottle`
+
+**Expected result:** ~115 of 162 unmapped meshes should now find materials
+
 ### 4. Created analyze_multi_materials.py Utility Script
 
 **Location:** `analyze_multi_materials.py` (new file)
@@ -96,24 +142,25 @@ Added a fallback chain in `godot_converter.gd` that tries multiple name variatio
 
 ## Current State
 
-- synty-converter has uncommitted changes in `godot_converter.gd` (the material fallback fix)
+- All changes committed and pushed to GitHub
+- Repository: https://github.com/DeniedWorks/synty-godot-converter
 - 4 packs converted and ready for testing:
   - `C:\Godot\Projects\PolygonNature` (working)
   - `C:\Godot\Projects\EnchantedForest` (working)
   - `C:\Godot\Projects\SciFiCity` (working, glass now transparent)
-  - `C:\Godot\Projects\FantasyKingdom` (working, 171 meshes still need materials)
+  - `C:\Godot\Projects\FantasyKingdom` (needs re-test with mesh variant fallback)
 
 ---
 
 ## What's Next / Remaining Issues
 
-1. **Commit the godot_converter.gd changes**
-2. **171 meshes without materials in Fantasy Kingdom are edge cases:**
-   - `*_Static` variants (not in MaterialList)
+1. **Test the mesh variant fallback on Fantasy Kingdom** - Godot timed out during last attempt; need to re-run
+2. **Address remaining ~47 meshes** - These are edge cases without clear base materials:
    - FX/particle meshes
-   - Some preset/composite meshes
+   - Truly undocumented materials
+   - May need manual handling or default material assignment
 3. **Older packs (PolygonNature) have static foliage** - could add name-based forcing for "Leaves" materials
-4. **Could investigate why some materials still don't match**
+4. **Consider placeholder/default materials for unmapped meshes** - Currently just warns
 
 ---
 
@@ -325,8 +372,14 @@ python extract_unity_properties.py "C:\SyntyComplete\YOUR_PACK.unitypackage"
 | File | Changes |
 |------|---------|
 | `shader_mapping.py` | Added `SHADER_SPECIFIC_PROPERTIES` dict, `validate_shader_properties()` function, fixed alpha handling for transparent materials |
-| `godot_converter.gd` | Added `find_material_path()` fallback function, fixed `ResourceLoader.exists()` usage |
+| `godot_converter.gd` | Added `find_material_path()` fallback function, fixed `ResourceLoader.exists()` usage, added `_try_material_fallbacks()` for mesh variant handling |
 | `analyze_multi_materials.py` | New utility script for analyzing multi-material prefabs |
+
+**Commits this session:**
+- `14243a7` - Shader property validation
+- `2bbac05` - Transparency/alpha fix
+- `bff21a8` - Material name fallback
+- `a4b9548` - Mesh variant fallback
 
 ---
 
@@ -334,8 +387,8 @@ python extract_unity_properties.py "C:\SyntyComplete\YOUR_PACK.unitypackage"
 
 ### Immediate (Next Session)
 
-1. **Commit godot_converter.gd changes** - Material name fallback fix is uncommitted
-2. **Address remaining 171 meshes in Fantasy Kingdom** - Edge cases like `*_Static` variants
+1. **Test mesh variant fallback on Fantasy Kingdom** - Re-run conversion to verify fix works
+2. **Address remaining ~47 unmapped meshes** - FX meshes, truly undocumented materials
 
 ### P2 - Polish Items - DONE (Previous Session)
 
@@ -561,8 +614,8 @@ I'm continuing work on the synty-converter project at C:\Godot\Projects\synty-co
 Please read the handoff document at C:\Godot\Projects\synty-converter\docs\SESSION_HANDOFF.md for full context.
 
 Immediate tasks:
-1. Commit the uncommitted changes in godot_converter.gd (material name fallback fix)
-2. Address the remaining 171 meshes without materials in Fantasy Kingdom (edge cases like *_Static variants)
+1. Test the mesh variant fallback on Fantasy Kingdom (Godot timed out last attempt)
+2. Address remaining ~47 meshes that need manual handling or default materials
 3. Consider adding name-based forcing for "Leaves" materials in older packs like PolygonNature
 ```
 
