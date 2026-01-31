@@ -63,6 +63,41 @@ from material_list import (
 logger = logging.getLogger(__name__)
 
 
+def has_source_assets_recursive(path: Path) -> bool:
+    """Check if a path contains any MaterialList, FBX, Models, or Textures anywhere in tree.
+
+    This is used to validate that the source_files path contains usable assets,
+    even if they are nested in subdirectories (like Dwarven Dungeon structure).
+
+    Args:
+        path: Directory to search recursively.
+
+    Returns:
+        True if any MaterialList*.txt, FBX directory, Models directory, or
+        Textures directory exists anywhere in the tree.
+    """
+    # Check for MaterialList files
+    if list(path.rglob("MaterialList*.txt")):
+        return True
+
+    # Check for FBX directories
+    for item in path.rglob("FBX"):
+        if item.is_dir():
+            return True
+
+    # Check for Models directories (some packs use this instead of FBX)
+    for item in path.rglob("Models"):
+        if item.is_dir():
+            return True
+
+    # Check for Textures directories
+    for item in path.rglob("Textures"):
+        if item.is_dir():
+            return True
+
+    return False
+
+
 def resolve_source_files_path(source_files: Path) -> Path:
     """Resolve the actual SourceFiles path, handling nested folder structures.
 
@@ -78,25 +113,30 @@ def resolve_source_files_path(source_files: Path) -> Path:
                 Textures/
                 MaterialList*.txt
 
-    Instead of the expected:
-        PackName/
-            SourceFiles/
+    Or complex multi-folder structures like Dwarven Dungeon:
+        SourceFiles/
+            DwarvenDungeon/
                 FBX/
+                MaterialList_PolygonMapsDwarfDungeon.txt
+                Textures/
+            Generic/
+                MaterialList_PolygonGeneric.txt
+                Models/
                 Textures/
 
-    This function checks if the given path contains the expected structure
-    (FBX/ or Textures/ subdirectories), and if not, looks for a nested
-    SourceFiles folder (trying all naming variants) that does.
+    This function checks if the given path contains usable assets (MaterialList,
+    FBX, or Textures) anywhere in its tree. If not found at the root level,
+    looks for a nested SourceFiles folder.
 
     Args:
         source_files: Path provided by the user as --source-files argument.
 
     Returns:
-        The resolved path to the actual SourceFiles directory containing
-        FBX/ and/or Textures/ subdirectories. If a nested SourceFiles folder
-        is found with the expected structure, returns that path. Otherwise,
-        returns the original path (which will fail validation later with
-        a clear error message).
+        The resolved path to the SourceFiles directory. If the path has assets
+        anywhere in its tree (even nested), returns the original path. If a
+        nested SourceFiles folder is found with assets, returns that path.
+        Otherwise, returns the original path (which will fail validation later
+        with a clear error message).
 
     Example:
         >>> # User points to outer folder
@@ -106,21 +146,42 @@ def resolve_source_files_path(source_files: Path) -> Path:
         >>> # User points to correct folder
         >>> resolve_source_files_path(Path("PolygonNature/SourceFiles"))
         Path("PolygonNature/SourceFiles")  # Already correct
+
+        >>> # Complex nested structure (Dwarven Dungeon)
+        >>> resolve_source_files_path(Path("DwarvenDungeon/SourceFiles"))
+        Path("DwarvenDungeon/SourceFiles")  # Has assets in subdirs
     """
-    # Check if current path has the expected structure (FBX/ or Textures/)
+    # Check if current path has assets at root level (simple structure)
     if (source_files / "FBX").exists() or (source_files / "Textures").exists():
+        return source_files
+
+    # Check if current path has assets anywhere in tree (complex nested structure)
+    if has_source_assets_recursive(source_files):
+        logger.info(
+            "Detected complex nested structure with assets in subdirectories: %s",
+            source_files
+        )
         return source_files
 
     # Look for nested folders with various naming conventions
     variants = ["SourceFiles", "Source Files", "Source_Files"]
     for variant in variants:
         nested = source_files / variant
-        if nested.exists() and ((nested / "FBX").exists() or (nested / "Textures").exists()):
-            logger.info(
-                "Detected nested source files folder ('%s'), using: %s",
-                variant, nested
-            )
-            return nested
+        if nested.exists():
+            # Check for assets at root level of nested folder
+            if (nested / "FBX").exists() or (nested / "Textures").exists():
+                logger.info(
+                    "Detected nested source files folder ('%s'), using: %s",
+                    variant, nested
+                )
+                return nested
+            # Check for assets anywhere in nested folder's tree
+            if has_source_assets_recursive(nested):
+                logger.info(
+                    "Detected nested source files folder with complex structure ('%s'), using: %s",
+                    variant, nested
+                )
+                return nested
 
     # Return original path (will fail validation later with clear error)
     return source_files
@@ -482,9 +543,17 @@ Examples:
     # Resolve nested SourceFiles folder structure (e.g., PackName_SourceFiles_v2/SourceFiles/)
     resolved_source_files = resolve_source_files_path(args.source_files)
 
+    # Check for Textures directory - can be at root or anywhere in tree (for complex structures)
     textures_dir = resolved_source_files / "Textures"
     if not textures_dir.exists():
-        parser.error(f"Textures directory not found: {textures_dir}")
+        # Try to find any Textures directory recursively
+        texture_dirs = list(resolved_source_files.rglob("Textures"))
+        texture_dirs = [d for d in texture_dirs if d.is_dir()]
+        if not texture_dirs:
+            parser.error(
+                f"No Textures directory found in {resolved_source_files} or its subdirectories. "
+                f"Expected 'Textures/' folder containing texture files."
+            )
 
     if not args.godot.exists():
         parser.error(f"Godot executable not found: {args.godot}")
@@ -612,16 +681,24 @@ def find_fallback_texture(textures_dir: Path) -> Path | None:
     return None
 
 
-def find_texture_file(textures_dir: Path, texture_name: str) -> Path | None:
+def find_texture_file(
+    textures_dir: Path,
+    texture_name: str,
+    additional_texture_dirs: list[Path] | None = None,
+) -> Path | None:
     """Find a texture file by name, trying various extensions.
 
     Searches for a texture file first in the root of textures_dir, then
-    recursively in subdirectories. Tries all extensions in TEXTURE_EXTENSIONS.
+    recursively in subdirectories. Also searches any additional texture
+    directories provided (for complex nested structures). Tries all
+    extensions in TEXTURE_EXTENSIONS.
 
     Args:
-        textures_dir: Directory to search for textures (e.g., SourceFiles/Textures).
+        textures_dir: Primary directory to search for textures.
         texture_name: Base name of the texture. May include extension (which
             will be stripped) or be just the stem (e.g., "PolygonNature_01").
+        additional_texture_dirs: Optional list of additional Textures directories
+            to search (for complex nested structures like Dwarven Dungeon).
 
     Returns:
         Path to the first matching texture file if found, None otherwise.
@@ -657,18 +734,29 @@ def find_texture_file(textures_dir: Path, texture_name: str) -> Path | None:
         name_variations.append(base_name.replace("_03", "_Texture_03"))
         name_variations.append(base_name.replace("_04", "_Texture_04"))
 
-    # Try each name variation with each extension
-    for name in name_variations:
-        for ext in TEXTURE_EXTENSIONS:
-            texture_path = textures_dir / f"{name}{ext}"
-            if texture_path.exists():
-                return texture_path
+    # Build list of all directories to search
+    all_texture_dirs = [textures_dir]
+    if additional_texture_dirs:
+        all_texture_dirs.extend(additional_texture_dirs)
 
-    # Try recursive search if not found in root
-    for name in name_variations:
-        for ext in TEXTURE_EXTENSIONS:
-            for texture_path in textures_dir.rglob(f"{name}{ext}"):
-                return texture_path
+    # Try each directory and name variation with each extension
+    for search_dir in all_texture_dirs:
+        if not search_dir.exists():
+            continue
+        for name in name_variations:
+            for ext in TEXTURE_EXTENSIONS:
+                texture_path = search_dir / f"{name}{ext}"
+                if texture_path.exists():
+                    return texture_path
+
+    # Try recursive search if not found in root of any directory
+    for search_dir in all_texture_dirs:
+        if not search_dir.exists():
+            continue
+        for name in name_variations:
+            for ext in TEXTURE_EXTENSIONS:
+                for texture_path in search_dir.rglob(f"{name}{ext}"):
+                    return texture_path
 
     return None
 
@@ -727,6 +815,7 @@ def copy_textures(
     fallback_texture: Path | None = None,
     texture_guid_to_path: dict[str, Path] | None = None,
     texture_name_to_guid: dict[str, str] | None = None,
+    additional_texture_dirs: list[Path] | None = None,
 ) -> tuple[int, int, int]:
     """Copy required texture files from SourceFiles/Textures to output/textures/.
 
@@ -746,7 +835,7 @@ def copy_textures(
     texture atlas as a substitute.
 
     Args:
-        source_textures: Source textures directory (e.g., SourceFiles/Textures).
+        source_textures: Primary source textures directory (e.g., SourceFiles/Textures).
         output_textures: Destination textures directory (e.g., output/textures).
             Must already exist.
         required: Set of texture names to copy. Can include extensions or just
@@ -761,6 +850,8 @@ def copy_textures(
             from temp files extracted from the .unitypackage.
         texture_name_to_guid: Optional reverse mapping of texture name to GUID.
             Used to look up the GUID for a texture name.
+        additional_texture_dirs: Optional list of additional Textures directories
+            to search (for complex nested structures like Dwarven Dungeon).
 
     Returns:
         Tuple of (textures_copied, textures_fallback, textures_missing) where:
@@ -808,8 +899,8 @@ def copy_textures(
             from_temp += 1
             continue
 
-        # Fall back to SourceFiles search
-        source_path = find_texture_file(source_textures, texture_name)
+        # Fall back to SourceFiles search (including additional directories)
+        source_path = find_texture_file(source_textures, texture_name, additional_texture_dirs)
 
         if source_path is None:
             # Texture not found - try fallback
@@ -891,15 +982,17 @@ def copy_fbx_files(
     output_models_dir: Path,
     dry_run: bool,
     filter_pattern: str | None = None,
+    additional_fbx_dirs: list[Path] | None = None,
 ) -> tuple[int, int]:
-    """Copy FBX files from SourceFiles/FBX to output/models/, preserving structure.
+    """Copy FBX files from FBX directories to output/models/, preserving structure.
 
     Recursively finds all .fbx files (case-insensitive) in the source directory
-    and copies them to the output, preserving the subdirectory structure.
-    Files that already exist with the same size are skipped.
+    (and any additional directories) and copies them to the output, preserving
+    the subdirectory structure. Files that already exist with the same size are
+    skipped.
 
     Args:
-        source_fbx_dir: Path to SourceFiles/FBX directory containing FBX models.
+        source_fbx_dir: Primary FBX directory containing FBX models.
         output_models_dir: Path to output/models directory. Subdirectories will
             be created as needed to preserve structure.
         dry_run: If True, only log what would be copied without actually
@@ -907,6 +1000,8 @@ def copy_fbx_files(
         filter_pattern: Optional filter pattern for FBX filenames. If specified,
             only FBX files containing this pattern (case-insensitive) are copied.
             If None, all FBX files are copied.
+        additional_fbx_dirs: Optional list of additional FBX directories to search
+            (for complex nested structures like Dwarven Dungeon).
 
     Returns:
         Tuple of (fbx_copied, fbx_skipped) where:
@@ -926,34 +1021,61 @@ def copy_fbx_files(
     copied = 0
     skipped = 0
 
-    if not source_fbx_dir.exists():
-        logger.warning("FBX source directory not found: %s", source_fbx_dir)
-        return 0, 0
+    # Build list of all FBX directories to search
+    all_fbx_dirs = [source_fbx_dir]
+    if additional_fbx_dirs:
+        all_fbx_dirs.extend(additional_fbx_dirs)
 
-    # Find all FBX files recursively (case-insensitive)
-    fbx_files = list(source_fbx_dir.rglob("*.fbx")) + list(source_fbx_dir.rglob("*.FBX"))
+    # Find all FBX files from all directories
+    fbx_files: list[tuple[Path, Path]] = []  # (source_path, base_dir)
+    for fbx_dir in all_fbx_dirs:
+        if not fbx_dir.exists():
+            logger.debug("FBX directory not found, skipping: %s", fbx_dir)
+            continue
+        # Find all FBX files recursively (case-insensitive)
+        dir_files = list(fbx_dir.rglob("*.fbx")) + list(fbx_dir.rglob("*.FBX"))
+        for f in dir_files:
+            fbx_files.append((f, fbx_dir))
+
     # Remove duplicates (Windows is case-insensitive)
-    fbx_files = list({f.resolve(): f for f in fbx_files}.values())
+    seen_paths: set[Path] = set()
+    unique_fbx_files: list[tuple[Path, Path]] = []
+    for source_path, base_dir in fbx_files:
+        resolved = source_path.resolve()
+        if resolved not in seen_paths:
+            seen_paths.add(resolved)
+            unique_fbx_files.append((source_path, base_dir))
+    fbx_files = unique_fbx_files
+
+    if not fbx_files:
+        dirs_checked = ", ".join(str(d) for d in all_fbx_dirs if d.exists())
+        if dirs_checked:
+            logger.warning("No FBX files found in: %s", dirs_checked)
+        else:
+            logger.warning("No FBX directories found")
+        return 0, 0
 
     # Apply filter pattern if specified
     if filter_pattern:
         pattern_lower = filter_pattern.lower()
         original_count = len(fbx_files)
-        fbx_files = [f for f in fbx_files if pattern_lower in f.stem.lower()]
+        fbx_files = [(f, d) for f, d in fbx_files if pattern_lower in f.stem.lower()]
         logger.info(
             "Filter '%s' matched %d of %d FBX files",
             filter_pattern, len(fbx_files), original_count
         )
 
     if not fbx_files:
-        logger.warning("No FBX files found in: %s", source_fbx_dir)
+        dirs_str = ", ".join(str(d) for d in all_fbx_dirs)
+        logger.warning("No FBX files found after filtering in: %s", dirs_str)
         return 0, 0
 
     logger.info("Found %d FBX files to copy", len(fbx_files))
 
-    for source_path in fbx_files:
+    for source_path, base_dir in fbx_files:
         # Calculate relative path to preserve subdirectory structure
-        relative_path = source_path.relative_to(source_fbx_dir)
+        # Use the base_dir this file came from to compute relative path
+        relative_path = source_path.relative_to(base_dir)
         dest_path = output_models_dir / relative_path
 
         # Skip if destination already exists and is same size
@@ -1704,7 +1826,8 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
         # Step 4.5: Parse MaterialList*.txt early for shader detection
         # This needs to happen BEFORE shader detection so we can use the
         # uses_custom_shader information from MaterialList
-        material_list_files = list(config.source_files.glob("MaterialList*.txt"))
+        # Use rglob for recursive search to handle complex nested structures
+        material_list_files = list(config.source_files.rglob("MaterialList*.txt"))
         prefabs: list[PrefabMaterials] = []
         shader_cache: dict[str, str] = {}
         unmatched_materials: list[str] = []
@@ -1803,7 +1926,17 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
 
         # Step 8: Copy required textures
         logger.info("Copying texture files...")
-        source_textures = config.source_files / "Textures"
+        # Find all Textures directories recursively for complex nested structures
+        texture_dirs = [config.source_files / "Textures"]
+        if not texture_dirs[0].exists():
+            texture_dirs = [d for d in config.source_files.rglob("Textures") if d.is_dir()]
+            if texture_dirs:
+                logger.info("Found %d Textures directories in nested structure", len(texture_dirs))
+                for td in texture_dirs:
+                    logger.debug("  Textures dir: %s", td)
+        source_textures = texture_dirs[0] if texture_dirs else config.source_files / "Textures"
+        # Additional texture directories (all except the primary one)
+        additional_texture_dirs = texture_dirs[1:] if len(texture_dirs) > 1 else None
         output_textures = pack_output_dir / "textures"
 
         # Build reverse lookup: texture_name -> GUID
@@ -1819,12 +1952,26 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
             fallback_texture=None,  # No fallback - let missing textures fail
             texture_guid_to_path=guid_map.texture_guid_to_path,
             texture_name_to_guid=texture_name_to_guid,
+            additional_texture_dirs=additional_texture_dirs,
         )
 
         # Step 8.5: Copy FBX files
         if not config.skip_fbx_copy:
             logger.info("Copying FBX files...")
-            source_fbx = config.source_files / "FBX"
+            # Find all FBX directories recursively for complex nested structures
+            # Also check for "Models" directories which some packs use (e.g., Generic folder)
+            fbx_dirs = [config.source_files / "FBX"]
+            if not fbx_dirs[0].exists():
+                # Search for both FBX and Models directories
+                fbx_dirs = [d for d in config.source_files.rglob("FBX") if d.is_dir()]
+                models_dirs = [d for d in config.source_files.rglob("Models") if d.is_dir()]
+                fbx_dirs.extend(models_dirs)
+                if fbx_dirs:
+                    logger.info("Found %d FBX/Models directories in nested structure", len(fbx_dirs))
+                    for fd in fbx_dirs:
+                        logger.debug("  FBX/Models dir: %s", fd)
+            source_fbx = fbx_dirs[0] if fbx_dirs else config.source_files / "FBX"
+            additional_fbx_dirs = fbx_dirs[1:] if len(fbx_dirs) > 1 else None
             output_models = pack_output_dir / "models"
 
             stats.fbx_copied, stats.fbx_skipped = copy_fbx_files(
@@ -1832,10 +1979,12 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
                 output_models,
                 config.dry_run,
                 config.filter_pattern,
+                additional_fbx_dirs=additional_fbx_dirs,
             )
 
             if stats.fbx_copied == 0 and stats.fbx_skipped == 0:
-                warning_msg = f"No FBX files found in {source_fbx}"
+                dirs_str = ", ".join(str(d) for d in fbx_dirs) if fbx_dirs else str(source_fbx)
+                warning_msg = f"No FBX files found in {dirs_str}"
                 stats.warnings.append(warning_msg)
         else:
             logger.info("Skipping FBX copy (--skip-fbx-copy)")
