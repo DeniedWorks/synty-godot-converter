@@ -120,8 +120,8 @@ def resolve_source_files_path(source_files: Path) -> Path:
     if has_source_assets_recursive(source_files):
         return source_files
 
-    # Log warning if no assets found
-    logger.warning("No MaterialList, FBX, or Models found in: %s", source_files)
+    # Log debug if no assets found (will be reported later if it's a real problem)
+    logger.debug("No MaterialList, FBX, or Models found in: %s", source_files)
     return source_files
 
 
@@ -490,8 +490,8 @@ Examples:
         texture_dirs = list(resolved_source_files.rglob("Textures"))
         texture_dirs = [d for d in texture_dirs if d.is_dir()]
         if not texture_dirs:
-            # This is just a warning now, not an error - textures come from .unitypackage
-            logger.warning(
+            # This is just informational now - textures come from .unitypackage primarily
+            logger.debug(
                 "No Textures directory found in %s or its subdirectories. "
                 "Textures will be extracted from .unitypackage only.",
                 resolved_source_files
@@ -543,7 +543,7 @@ def setup_output_directories(output_dir: Path, dry_run: bool) -> None:
 
     for directory in directories:
         if dry_run:
-            logger.info("[DRY RUN] Would create directory: %s", directory)
+            logger.debug("[DRY RUN] Would create directory: %s", directory)
         else:
             directory.mkdir(parents=True, exist_ok=True)
             logger.debug("Created directory: %s", directory)
@@ -592,9 +592,9 @@ def copy_shaders(shaders_dest: Path, dry_run: bool) -> int:
         copied += 1
 
     if skipped > 0:
-        logger.info("Copied %d shader files (%d already existed)", copied, skipped)
+        logger.debug("Copied %d shader files (%d already existed)", copied, skipped)
     else:
-        logger.info("Copied %d shader files", copied)
+        logger.debug("Copied %d shader files", copied)
     return copied
 
 
@@ -904,17 +904,17 @@ def copy_textures(
 
     # Log summary with source breakdown
     if from_temp > 0 or from_source > 0:
-        logger.info(
+        logger.debug(
             "Copied %d textures (%d from package, %d from SourceFiles), %d fallback, %d missing",
             copied, from_temp, from_source, fallback_count, missing
         )
     elif fallback_count > 0:
-        logger.info(
+        logger.debug(
             "Copied %d textures, %d using fallback atlas, %d missing",
             copied, fallback_count, missing
         )
     else:
-        logger.info("Copied %d textures, %d missing", copied, missing)
+        logger.debug("Copied %d textures, %d missing", copied, missing)
 
     return copied, fallback_count, missing
 
@@ -1002,7 +1002,7 @@ def copy_fbx_files(
         pattern_lower = filter_pattern.lower()
         original_count = len(fbx_files)
         fbx_files = [(f, d) for f, d in fbx_files if pattern_lower in f.stem.lower()]
-        logger.info(
+        logger.debug(
             "Filter '%s' matched %d of %d FBX files",
             filter_pattern, len(fbx_files), original_count
         )
@@ -1012,7 +1012,7 @@ def copy_fbx_files(
         logger.warning("No FBX files found after filtering in: %s", dirs_str)
         return 0, 0
 
-    logger.info("Found %d FBX files to copy", len(fbx_files))
+    logger.debug("Found %d FBX files to copy", len(fbx_files))
 
     for source_path, base_dir in fbx_files:
         # Calculate relative path to preserve subdirectory structure
@@ -1037,7 +1037,7 @@ def copy_fbx_files(
             logger.debug("Copied FBX: %s", relative_path)
             copied += 1
 
-    logger.info("Copied %d FBX files, skipped %d existing", copied, skipped)
+    logger.debug("Copied %d FBX files, skipped %d existing", copied, skipped)
     return copied, skipped
 
 
@@ -1071,7 +1071,7 @@ def generate_converter_config(
     config_path = project_dir / "converter_config.json"
 
     if dry_run:
-        logger.info("[DRY RUN] Would write converter_config.json: %s", config)
+        logger.debug("[DRY RUN] Would write converter_config.json: %s", config)
     else:
         config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
         logger.debug("Wrote converter_config.json: %s", config)
@@ -1184,8 +1184,8 @@ def run_godot_cli(
 
     # Phase 1: Import (can be skipped for large projects that timeout)
     if skip_import:
-        logger.info("Skipping Godot import phase (--skip-godot-import)")
-        logger.info("Note: You must open the project in Godot manually to trigger asset import")
+        logger.debug("Skipping Godot import phase (--skip-godot-import)")
+        logger.debug("Note: You must open the project in Godot manually to trigger asset import")
         import_success = True  # Treat as success so converter phase runs
     else:
         import_cmd = [
@@ -1196,10 +1196,10 @@ def run_godot_cli(
         ]
 
         if dry_run:
-            logger.info("[DRY RUN] Would run: %s", " ".join(import_cmd))
+            logger.debug("[DRY RUN] Would run: %s", " ".join(import_cmd))
             import_success = True
         else:
-            logger.info("Running Godot import (timeout: %ds)...", timeout_seconds)
+            logger.debug("Running Godot import (timeout: %ds)...", timeout_seconds)
             logger.debug("Command: %s", " ".join(import_cmd))
 
             try:
@@ -1214,7 +1214,7 @@ def run_godot_cli(
                 elapsed = time.time() - start_time
 
                 if result.returncode == 0:
-                    logger.info("Godot import completed in %.1fs", elapsed)
+                    logger.debug("Godot import completed in %.1fs", elapsed)
                     import_success = True
                 else:
                     logger.error("Godot import failed (exit code %d)", result.returncode)
@@ -1242,10 +1242,10 @@ def run_godot_cli(
     ]
 
     if dry_run:
-        logger.info("[DRY RUN] Would run: %s", " ".join(convert_cmd))
+        logger.debug("[DRY RUN] Would run: %s", " ".join(convert_cmd))
         convert_success = True
     else:
-        logger.info("Running Godot converter script (timeout: %ds)...", timeout_seconds)
+        logger.debug("Running Godot converter script (timeout: %ds)...", timeout_seconds)
         logger.debug("Command: %s", " ".join(convert_cmd))
 
         try:
@@ -1260,7 +1260,7 @@ def run_godot_cli(
             elapsed = time.time() - start_time
 
             if result.returncode == 0:
-                logger.info("Godot converter completed in %.1fs", elapsed)
+                logger.debug("Godot converter completed in %.1fs", elapsed)
                 convert_success = True
 
                 # Log output for debugging
@@ -1396,10 +1396,10 @@ def _merge_shader_globals(existing_content: str, template_section: str) -> str:
     }
 
     if not new_uniforms:
-        logger.info("All shader uniforms already present in existing project.godot")
+        logger.debug("All shader uniforms already present in existing project.godot")
         return existing_content
 
-    logger.info("Adding %d new shader uniform(s): %s", len(new_uniforms), ", ".join(new_uniforms.keys()))
+    logger.debug("Adding %d new shader uniform(s): %s", len(new_uniforms), ", ".join(new_uniforms.keys()))
 
     if existing_section:
         # Append new uniforms to existing section
@@ -1457,9 +1457,9 @@ def generate_project_godot(
 
     if dry_run:
         if project_path.exists():
-            logger.info("[DRY RUN] Would merge shader uniforms into: %s", project_path)
+            logger.debug("[DRY RUN] Would merge shader uniforms into: %s", project_path)
         else:
-            logger.info("[DRY RUN] Would write project.godot to: %s", project_path)
+            logger.debug("[DRY RUN] Would write project.godot to: %s", project_path)
         return
 
     if project_path.exists():
@@ -1478,7 +1478,7 @@ def generate_project_godot(
 
         # Write back
         project_path.write_text(updated_content, encoding="utf-8")
-        logger.info("Updated project.godot with merged shader uniforms")
+        logger.debug("Updated project.godot with merged shader uniforms")
     else:
         # Create new project.godot with pack name
         project_content = PROJECT_GODOT_TEMPLATE.replace(
@@ -1486,7 +1486,7 @@ def generate_project_godot(
             f'config/name="{pack_name}"'
         )
         project_path.write_text(project_content, encoding="utf-8")
-        logger.info("Wrote project.godot with project name '%s'", pack_name)
+        logger.debug("Wrote project.godot with project name '%s'", pack_name)
 
 
 def write_conversion_log(output_dir: Path, stats: ConversionStats, config: ConversionConfig) -> None:
@@ -1543,7 +1543,7 @@ def write_conversion_log(output_dir: Path, stats: ConversionStats, config: Conve
     lines.append("=" * 60)
 
     log_path.write_text("\n".join(lines), encoding="utf-8")
-    logger.info("Wrote conversion log to: %s", log_path)
+    logger.debug("Wrote conversion log to: %s", log_path)
 
 
 def print_summary(stats: ConversionStats) -> None:
@@ -1552,47 +1552,40 @@ def print_summary(stats: ConversionStats) -> None:
     Args:
         stats: Conversion statistics.
     """
-    print("\n" + "=" * 60)
-    print("Conversion Complete")
-    print("=" * 60)
-    print(f"  Materials Parsed:    {stats.materials_parsed}")
-    print(f"  Materials Generated: {stats.materials_generated}")
-    if stats.materials_missing > 0:
-        print(f"  Materials Missing:   {stats.materials_missing}")
-    print(f"  Textures Copied:     {stats.textures_copied}")
-    print(f"  Textures Missing:    {stats.textures_missing}")
-    print(f"  Shaders Copied:      {stats.shaders_copied}")
-    print(f"  FBX Files Copied:    {stats.fbx_copied}")
-    if stats.fbx_skipped > 0:
-        print(f"  FBX Files Skipped:   {stats.fbx_skipped} (already existed)")
-    print(f"  Meshes Converted:    {stats.meshes_converted}")
+    print("=" * 40)
+    print("Conversion Complete!")
+    print(f"  Materials: {stats.materials_generated} generated")
+    print(f"  Textures: {stats.textures_copied} copied")
+    print(f"  Meshes: {stats.meshes_converted} converted")
+    print("=" * 40)
 
-    # Godot CLI status
-    if stats.godot_import_success and stats.godot_convert_success:
-        print("  Godot CLI:           Success")
-    elif stats.godot_import_success and stats.meshes_converted > 0:
-        # Meshes were converted even if script reported warnings
-        print("  Godot CLI:           Success (with warnings)")
-    elif stats.godot_timeout_occurred:
-        print("  Godot CLI:           TIMEOUT")
+    # Show additional details if there are issues
+    if stats.materials_missing > 0:
+        print(f"  Materials Missing: {stats.materials_missing}")
+    if stats.textures_missing > 0:
+        print(f"  Textures Missing: {stats.textures_missing}")
+
+    # Godot CLI status (only show if there was a problem)
+    if stats.godot_timeout_occurred:
+        print("  Godot CLI: TIMEOUT")
     elif not stats.godot_import_success and not stats.godot_convert_success:
-        print("  Godot CLI:           Skipped")
+        pass  # Skipped - don't show
     elif not stats.godot_import_success:
-        print("  Godot CLI:           Import Failed")
-    elif not stats.godot_convert_success:
-        print("  Godot CLI:           Conversion Failed")
+        print("  Godot CLI: Import Failed")
+    elif not stats.godot_convert_success and stats.meshes_converted == 0:
+        print("  Godot CLI: Conversion Failed")
 
     if stats.warnings:
-        print(f"\n  Warnings: {len(stats.warnings)}")
+        print(f"  Warnings: {len(stats.warnings)}")
 
     if stats.errors:
-        print(f"\n  Errors: {len(stats.errors)}")
+        print(f"  Errors: {len(stats.errors)}")
         for error in stats.errors[:5]:
             print(f"    - {error}")
         if len(stats.errors) > 5:
             print(f"    ... and {len(stats.errors) - 5} more")
 
-    print("=" * 60 + "\n")
+    print()  # Empty line at end
 
 
 def build_shader_cache(
@@ -1711,24 +1704,29 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
     shaders_dir = config.output_dir / "shaders"
     project_dir = config.output_dir
 
+    # Print header
+    print("\n" + "=" * 40)
+    print(f"Starting conversion: {config.unity_package.name}")
+    print("=" * 40)
+
     # Step 1: Validate inputs (already done in parse_args, but double-check)
-    logger.info("Starting conversion pipeline...")
-    logger.info("  Pack Name: %s", pack_name)
-    logger.info("  Unity Package: %s", config.unity_package)
-    logger.info("  Source Files: %s", config.source_files)
-    logger.info("  Pack Output: %s", pack_output_dir)
-    logger.info("  Shaders Dir: %s", shaders_dir)
-    logger.info("  Project Dir: %s", project_dir)
+    logger.info("Step 1: Validating inputs...")
+    logger.debug("  Pack Name: %s", pack_name)
+    logger.debug("  Unity Package: %s", config.unity_package)
+    logger.debug("  Source Files: %s", config.source_files)
+    logger.debug("  Pack Output: %s", pack_output_dir)
+    logger.debug("  Shaders Dir: %s", shaders_dir)
+    logger.debug("  Project Dir: %s", project_dir)
 
     # Step 2: Create output directory structure
-    logger.info("Creating output directory structure...")
+    logger.info("Step 2: Creating directories...")
     setup_output_directories(pack_output_dir, config.dry_run)
 
     # Step 3: Extract Unity package
-    logger.info("Extracting Unity package...")
+    logger.info("Step 3: Extracting Unity package...")
     try:
         guid_map: GuidMap = extract_unitypackage(config.unity_package)
-        logger.info("Extracted %d assets from Unity package", len(guid_map.guid_to_pathname))
+        logger.debug("Extracted %d assets from Unity package", len(guid_map.guid_to_pathname))
     except Exception as e:
         error_msg = f"Failed to extract Unity package: {e}"
         logger.error(error_msg)
@@ -1742,15 +1740,15 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
 
     try:
         # Step 4: Parse all .mat files
-        logger.info("Parsing Unity materials...")
         material_guids = get_material_guids(guid_map)
+        logger.info("Step 4: Parsing %d materials...", len(material_guids))
         unity_materials: list[tuple[str, UnityMaterial]] = []
 
         for guid in material_guids:
             content = guid_map.guid_to_content.get(guid)
             if content is None:
                 warning_msg = f"No content for material GUID: {guid}"
-                logger.warning(warning_msg)
+                logger.debug(warning_msg)
                 stats.warnings.append(warning_msg)
                 continue
 
@@ -1760,10 +1758,10 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
                 stats.materials_parsed += 1
             except Exception as e:
                 warning_msg = f"Failed to parse material GUID {guid}: {e}"
-                logger.warning(warning_msg)
+                logger.debug(warning_msg)
                 stats.warnings.append(warning_msg)
 
-        logger.info("Parsed %d Unity materials", stats.materials_parsed)
+        logger.debug("Parsed %d Unity materials", stats.materials_parsed)
 
         # Step 4.5: Parse MaterialList*.txt early for shader detection
         # This needs to happen BEFORE shader detection so we can use the
@@ -1776,33 +1774,34 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
 
         if material_list_files:
             for material_list_path in material_list_files:
-                logger.info("Parsing %s for shader detection...", material_list_path.name)
+                logger.debug("Parsing %s for shader detection...", material_list_path.name)
                 try:
                     file_prefabs = parse_material_list(material_list_path)
                     prefabs.extend(file_prefabs)
-                    logger.info("  Found %d prefabs in %s", len(file_prefabs), material_list_path.name)
+                    logger.debug("  Found %d prefabs in %s", len(file_prefabs), material_list_path.name)
                 except Exception as e:
-                    logger.warning("Failed to parse %s: %s", material_list_path.name, e)
+                    logger.debug("Failed to parse %s: %s", material_list_path.name, e)
 
-            logger.info("Total prefabs from all MaterialList files: %d", len(prefabs))
+            logger.debug("Total prefabs from all MaterialList files: %d", len(prefabs))
 
-            # Build shader cache with LOD inheritance
-            logger.info("Building shader decision cache...")
+            # Step 5: Build shader cache with LOD inheritance
+            logger.info("Step 5: Mapping shader properties...")
             shader_cache, unmatched_materials = build_shader_cache(prefabs)
-            logger.info("Shader cache: %d materials cached", len(shader_cache))
+            logger.debug("Shader cache: %d materials cached", len(shader_cache))
 
             # Log unmatched materials for user to add patterns
             if unmatched_materials:
-                logger.warning("=" * 60)
-                logger.warning("UNMATCHED MATERIALS - Consider adding name patterns for:")
+                logger.debug("=" * 60)
+                logger.debug("UNMATCHED MATERIALS - Consider adding name patterns for:")
                 for mat_name in sorted(set(unmatched_materials)):
-                    logger.warning("  - %s", mat_name)
-                logger.warning("=" * 60)
+                    logger.debug("  - %s", mat_name)
+                logger.debug("=" * 60)
         else:
-            logger.info("MaterialList*.txt not found, using fallback shader detection")
+            logger.info("Step 5: Mapping shader properties...")
+            logger.debug("MaterialList*.txt not found, using fallback shader detection")
 
-        # Step 5: Detect shaders and map properties
-        logger.info("Mapping materials to Godot format...")
+        # Map material properties to Godot equivalents (continuation of Step 5)
+        logger.debug("Mapping materials to Godot format...")
         mapped_materials: list[MappedMaterial] = []
         required_textures: set[str] = set()
 
@@ -1819,13 +1818,13 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
 
             except Exception as e:
                 warning_msg = f"Failed to map material '{unity_mat.name}': {e}"
-                logger.warning(warning_msg)
+                logger.debug(warning_msg)
                 stats.warnings.append(warning_msg)
 
-        logger.info("Mapped %d materials, requiring %d textures", len(mapped_materials), len(required_textures))
+        logger.debug("Mapped %d materials, requiring %d textures", len(mapped_materials), len(required_textures))
 
         # Step 6: Generate .tres files
-        logger.info("Generating Godot .tres material files...")
+        logger.info("Step 6: Generating .tres files...")
         materials_dir = pack_output_dir / "materials"
 
         # Pack-relative texture path (textures are in pack folder, not root)
@@ -1854,13 +1853,13 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
 
             except Exception as e:
                 warning_msg = f"Failed to generate .tres for '{mapped_mat.name}': {e}"
-                logger.warning(warning_msg)
+                logger.debug(warning_msg)
                 stats.warnings.append(warning_msg)
 
-        logger.info("Generated %d .tres material files", stats.materials_generated)
+        logger.debug("Generated %d .tres material files", stats.materials_generated)
 
         # Step 7: Copy .gdshader files
-        logger.info("Copying shader files...")
+        logger.info("Step 7: Copying shaders...")
         stats.shaders_copied = copy_shaders(
             shaders_dir,
             config.dry_run,
@@ -1869,17 +1868,17 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
         # Step 8: Copy required textures
         # Textures primarily come from .unitypackage extraction (texture_guid_to_path)
         # SourceFiles/Textures is used as optional fallback for any missing textures
-        logger.info("Copying texture files...")
+        logger.info("Step 8: Copying %d textures...", len(required_textures))
         # Find all Textures directories recursively for complex nested structures (optional fallback)
         texture_dirs = [config.source_files / "Textures"]
         if not texture_dirs[0].exists():
             texture_dirs = [d for d in config.source_files.rglob("Textures") if d.is_dir()]
             if texture_dirs:
-                logger.info("Found %d Textures directories as fallback sources", len(texture_dirs))
+                logger.debug("Found %d Textures directories as fallback sources", len(texture_dirs))
                 for td in texture_dirs:
                     logger.debug("  Textures dir: %s", td)
             else:
-                logger.info("No SourceFiles/Textures found - using .unitypackage textures only")
+                logger.debug("No SourceFiles/Textures found - using .unitypackage textures only")
         source_textures = texture_dirs[0] if texture_dirs else config.source_files / "Textures"
         # Additional texture directories (all except the primary one)
         additional_texture_dirs = texture_dirs[1:] if len(texture_dirs) > 1 else None
@@ -1901,9 +1900,8 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
             additional_texture_dirs=additional_texture_dirs,
         )
 
-        # Step 8.5: Copy FBX files
+        # Step 9: Copy FBX files
         if not config.skip_fbx_copy:
-            logger.info("Copying FBX files...")
             # Find all FBX directories recursively for complex nested structures
             # Also check for "Models" directories which some packs use (e.g., Generic folder)
             fbx_dirs = [config.source_files / "FBX"]
@@ -1913,12 +1911,22 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
                 models_dirs = [d for d in config.source_files.rglob("Models") if d.is_dir()]
                 fbx_dirs.extend(models_dirs)
                 if fbx_dirs:
-                    logger.info("Found %d FBX/Models directories in nested structure", len(fbx_dirs))
+                    logger.debug("Found %d FBX/Models directories in nested structure", len(fbx_dirs))
                     for fd in fbx_dirs:
                         logger.debug("  FBX/Models dir: %s", fd)
             source_fbx = fbx_dirs[0] if fbx_dirs else config.source_files / "FBX"
             additional_fbx_dirs = fbx_dirs[1:] if len(fbx_dirs) > 1 else None
             output_models = pack_output_dir / "models"
+
+            # Count FBX files before copying for step message
+            all_fbx_dirs = [source_fbx]
+            if additional_fbx_dirs:
+                all_fbx_dirs.extend(additional_fbx_dirs)
+            fbx_count = 0
+            for fbx_dir in all_fbx_dirs:
+                if fbx_dir.exists():
+                    fbx_count += len(list(fbx_dir.rglob("*.fbx"))) + len(list(fbx_dir.rglob("*.FBX")))
+            logger.info("Step 9: Copying %d FBX files...", fbx_count)
 
             stats.fbx_copied, stats.fbx_skipped = copy_fbx_files(
                 source_fbx,
@@ -1933,21 +1941,22 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
                 warning_msg = f"No FBX files found in {dirs_str}"
                 stats.warnings.append(warning_msg)
         else:
-            logger.info("Skipping FBX copy (--skip-fbx-copy)")
+            logger.info("Step 9: Skipping FBX copy...")
 
-        # Step 9: Generate mesh_material_mapping.json (uses prefabs parsed in Step 4.5)
+        # Step 10: Generate mesh_material_mapping.json (uses prefabs parsed in Step 4.5)
         # Note: mapping goes to shaders_dir to be shared across packs
+        logger.info("Step 10: Generating mesh material mapping...")
         if prefabs:
             mapping_output = shaders_dir / "mesh_material_mapping.json"
             if config.dry_run:
-                logger.info("[DRY RUN] Would write mesh_material_mapping.json")
+                logger.debug("[DRY RUN] Would write mesh_material_mapping.json")
             else:
                 generate_mesh_material_mapping_json(prefabs, mapping_output)
-                logger.info("Generated mesh_material_mapping.json")
+                logger.debug("Generated mesh_material_mapping.json")
 
-            # Step 9.5: Check for missing material references (no placeholders - just warn)
+            # Check for missing material references (no placeholders - just warn)
             if not config.dry_run:
-                logger.info("Checking for missing material references...")
+                logger.debug("Checking for missing material references...")
                 materials_dir = pack_output_dir / "materials"
                 existing_materials = {f.stem for f in materials_dir.glob("*.tres")}
 
@@ -1964,26 +1973,26 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
                 stats.materials_missing = len(missing_materials)
 
                 if missing_materials:
-                    logger.warning(
+                    logger.debug(
                         "Found %d missing material(s) - these meshes will use default materials:",
                         len(missing_materials)
                     )
                     for mat_name in sorted(missing_materials):
-                        logger.warning("  Missing: %s", mat_name)
+                        logger.debug("  Missing: %s", mat_name)
                 else:
-                    logger.info("All referenced materials exist")
+                    logger.debug("All referenced materials exist")
             else:
-                logger.info("Skipping missing materials check (dry run)")
+                logger.debug("Skipping missing materials check (dry run)")
         else:
-            logger.info("No MaterialList data available, skipping mesh-material mapping")
+            logger.debug("No MaterialList data available, skipping mesh-material mapping")
 
         # Step 11: Generate or update project.godot
-        logger.info("Generating/updating project.godot...")
+        logger.info("Step 11: Generating project.godot...")
         generate_project_godot(project_dir, pack_name, config.dry_run)
 
         # Step 12: Run Godot CLI to convert FBX to .tscn scene files
         if not config.skip_godot_cli:
-            logger.info("Running Godot CLI conversion...")
+            logger.info("Step 12: Running Godot CLI...")
 
             (
                 stats.godot_import_success,
@@ -2015,11 +2024,11 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
                 error_msg = "Godot converter script failed"
                 stats.errors.append(error_msg)
             elif stats.meshes_converted > 0:
-                logger.info("Generated %d .tscn scene files", stats.meshes_converted)
+                logger.debug("Generated %d .tscn scene files", stats.meshes_converted)
             else:
-                logger.warning("No mesh files generated")
+                logger.debug("No mesh files generated")
         else:
-            logger.info("Skipping Godot CLI (--skip-godot-cli)")
+            logger.info("Step 12: Skipping Godot CLI...")
 
         # Write conversion log (not in dry run for the log file itself)
         # Note: log goes to shaders_dir to be shared across packs
@@ -2032,7 +2041,7 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
         # Cleanup temp texture files (always runs, even on error)
         if temp_dir_to_cleanup and temp_dir_to_cleanup.exists():
             shutil.rmtree(temp_dir_to_cleanup, ignore_errors=True)
-            logger.info("Cleaned up temp texture directory: %s", temp_dir_to_cleanup)
+            logger.debug("Cleaned up temp texture directory: %s", temp_dir_to_cleanup)
 
 
 def main() -> int:
