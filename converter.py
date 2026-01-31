@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import logging
 import random
 import re
@@ -197,6 +198,14 @@ class ConversionConfig:
             manually to trigger asset import before running the converter.
         godot_timeout: Timeout in seconds for Godot CLI operations. Each phase
             (import and convert) has this timeout applied separately.
+        keep_meshes_together: If True, keep all meshes from one FBX together in
+            a single scene file. If False (default), each mesh is saved as a
+            separate .tscn file.
+        mesh_format: Output format for mesh scenes. Either 'tscn' (text format,
+            default) or 'res' (binary compiled resource format).
+        filter_pattern: Optional filter pattern for FBX filenames. If specified,
+            only FBX files containing this pattern (case-insensitive) are
+            processed. If None, all FBX files are processed.
 
     Example:
         >>> config = ConversionConfig(
@@ -219,6 +228,9 @@ class ConversionConfig:
     skip_godot_cli: bool = False
     skip_godot_import: bool = False
     godot_timeout: int = 600
+    keep_meshes_together: bool = False
+    mesh_format: str = "tscn"
+    filter_pattern: str | None = None
 
 
 @dataclass
@@ -374,6 +386,25 @@ Examples:
         default=600,
         help="Timeout for Godot CLI operations in seconds (default: 600)",
     )
+    parser.add_argument(
+        "--keep-meshes-together",
+        action="store_true",
+        help="Keep all meshes from one FBX together in a single scene file "
+             "(default: each mesh saved as separate .tscn)",
+    )
+    parser.add_argument(
+        "--mesh-format",
+        choices=["tscn", "res"],
+        default="tscn",
+        help="Output format for mesh scenes: 'tscn' (text, default) or 'res' (binary)",
+    )
+    parser.add_argument(
+        "--filter",
+        type=str,
+        default=None,
+        help="Filter pattern for FBX filenames (case-insensitive). "
+             "Example: --filter Tree only converts FBX files containing 'Tree'",
+    )
 
     args = parser.parse_args()
 
@@ -402,6 +433,9 @@ Examples:
         skip_godot_cli=args.skip_godot_cli,
         skip_godot_import=args.skip_godot_import,
         godot_timeout=args.godot_timeout,
+        keep_meshes_together=args.keep_meshes_together,
+        mesh_format=args.mesh_format,
+        filter_pattern=args.filter,
     )
 
 
@@ -789,6 +823,7 @@ def copy_fbx_files(
     source_fbx_dir: Path,
     output_models_dir: Path,
     dry_run: bool,
+    filter_pattern: str | None = None,
 ) -> tuple[int, int]:
     """Copy FBX files from SourceFiles/FBX to output/models/, preserving structure.
 
@@ -802,6 +837,9 @@ def copy_fbx_files(
             be created as needed to preserve structure.
         dry_run: If True, only log what would be copied without actually
             copying files.
+        filter_pattern: Optional filter pattern for FBX filenames. If specified,
+            only FBX files containing this pattern (case-insensitive) are copied.
+            If None, all FBX files are copied.
 
     Returns:
         Tuple of (fbx_copied, fbx_skipped) where:
@@ -829,6 +867,16 @@ def copy_fbx_files(
     fbx_files = list(source_fbx_dir.rglob("*.fbx")) + list(source_fbx_dir.rglob("*.FBX"))
     # Remove duplicates (Windows is case-insensitive)
     fbx_files = list({f.resolve(): f for f in fbx_files}.values())
+
+    # Apply filter pattern if specified
+    if filter_pattern:
+        pattern_lower = filter_pattern.lower()
+        original_count = len(fbx_files)
+        fbx_files = [f for f in fbx_files if pattern_lower in f.stem.lower()]
+        logger.info(
+            "Filter '%s' matched %d of %d FBX files",
+            filter_pattern, len(fbx_files), original_count
+        )
 
     if not fbx_files:
         logger.warning("No FBX files found in: %s", source_fbx_dir)
@@ -862,12 +910,51 @@ def copy_fbx_files(
     return copied, skipped
 
 
+def generate_converter_config(
+    project_dir: Path,
+    keep_meshes_together: bool,
+    mesh_format: str,
+    filter_pattern: str | None,
+    dry_run: bool,
+) -> None:
+    """Generate converter_config.json for Godot's godot_converter.gd script.
+
+    This JSON file passes configuration options from the Python CLI to the
+    GDScript converter. The config is placed in the project root where
+    godot_converter.gd will read it.
+
+    Args:
+        project_dir: Path to the Godot project directory.
+        keep_meshes_together: If True, keep all meshes from one FBX together
+            in a single scene file.
+        mesh_format: Output format - 'tscn' (text) or 'res' (binary).
+        filter_pattern: Optional filter pattern for FBX filenames.
+        dry_run: If True, only log what would be written.
+    """
+    config = {
+        "keep_meshes_together": keep_meshes_together,
+        "mesh_format": mesh_format,
+        "filter_pattern": filter_pattern,
+    }
+
+    config_path = project_dir / "converter_config.json"
+
+    if dry_run:
+        logger.info("[DRY RUN] Would write converter_config.json: %s", config)
+    else:
+        config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+        logger.debug("Wrote converter_config.json: %s", config)
+
+
 def run_godot_cli(
     godot_exe: Path,
     project_dir: Path,
     timeout_seconds: int,
     dry_run: bool,
     skip_import: bool = False,
+    keep_meshes_together: bool = False,
+    mesh_format: str = "tscn",
+    filter_pattern: str | None = None,
 ) -> tuple[bool, bool, bool]:
     """Run Godot CLI in two phases: import and convert.
 
@@ -888,7 +975,8 @@ def run_godot_cli(
         models to .tscn scene files in the meshes/ directory.
 
     The godot_converter.gd script is copied from the converter project to the
-    output project directory before execution.
+    output project directory before execution. A converter_config.json file
+    is also generated to pass configuration options to the GDScript.
 
     Args:
         godot_exe: Path to Godot 4.6 executable. Must exist.
@@ -900,6 +988,13 @@ def run_godot_cli(
         skip_import: If True, skip the import phase and only run the converter
             script. Useful for large projects where Godot's headless import
             times out. The user must open the project in Godot manually first.
+        keep_meshes_together: If True, keep all meshes from one FBX together
+            in a single scene file. If False (default), each mesh is saved
+            as a separate scene file.
+        mesh_format: Output format for mesh scenes - 'tscn' (text, default)
+            or 'res' (binary compiled resource).
+        filter_pattern: Optional filter pattern for FBX filenames. Only FBX
+            files containing this pattern (case-insensitive) are processed.
 
     Returns:
         Tuple of (import_success, convert_success, timeout_occurred) where:
@@ -942,6 +1037,15 @@ def run_godot_cli(
     if not dry_run:
         shutil.copy2(converter_script, dest_script)
         logger.debug("Copied godot_converter.gd to project")
+
+    # Generate converter config JSON for the GDScript to read
+    generate_converter_config(
+        project_dir,
+        keep_meshes_together,
+        mesh_format,
+        filter_pattern,
+        dry_run,
+    )
 
     import_success = False
     convert_success = False
@@ -1049,21 +1153,22 @@ def run_godot_cli(
     return import_success, convert_success, timeout_occurred
 
 
-def count_tscn_files(meshes_dir: Path) -> int:
-    """Count .tscn scene files in the meshes directory.
+def count_mesh_files(meshes_dir: Path, mesh_format: str = "tscn") -> int:
+    """Count mesh scene files in the meshes directory.
 
-    Recursively counts all files with the .tscn extension in the given
+    Recursively counts all files with the specified extension in the given
     directory. Used to verify the Godot converter script produced output.
 
     Args:
         meshes_dir: Path to the meshes/ directory to search.
+        mesh_format: File extension to count - 'tscn' or 'res'.
 
     Returns:
-        Number of .tscn files found, or 0 if the directory does not exist.
+        Number of mesh files found, or 0 if the directory does not exist.
     """
     if not meshes_dir.exists():
         return 0
-    return len(list(meshes_dir.rglob("*.tscn")))
+    return len(list(meshes_dir.rglob(f"*.{mesh_format}")))
 
 
 def _extract_shader_globals_section(content: str) -> str:
@@ -1659,6 +1764,7 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
                 source_fbx,
                 output_models,
                 config.dry_run,
+                config.filter_pattern,
             )
 
             if stats.fbx_copied == 0 and stats.fbx_skipped == 0:
@@ -1724,11 +1830,14 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
                 config.godot_timeout,
                 config.dry_run,
                 skip_import=config.skip_godot_import,
+                keep_meshes_together=config.keep_meshes_together,
+                mesh_format=config.mesh_format,
+                filter_pattern=config.filter_pattern,
             )
 
-            # Count generated .tscn files
+            # Count generated mesh files
             meshes_dir = pack_output_dir / "meshes"
-            stats.meshes_converted = count_tscn_files(meshes_dir)
+            stats.meshes_converted = count_mesh_files(meshes_dir, config.mesh_format)
 
             if stats.godot_timeout_occurred:
                 error_msg = f"Godot CLI timed out after {config.godot_timeout}s"

@@ -152,6 +152,9 @@ python converter.py \
 | `--skip-fbx-copy` | Off | Skip copying FBX files to output/models/. Use when re-running conversion and models already exist. |
 | `--skip-godot-cli` | Off | Skip running Godot CLI. Generates materials only, no mesh .res files. Useful for debugging material issues. |
 | `--godot-timeout` | 600 | Maximum seconds for Godot CLI operations. Increase for very large packs. |
+| `--keep-meshes-together` | Off | Keep all meshes from one FBX together in a single scene file. Default behavior is to save each mesh as a separate file. |
+| `--mesh-format` | `tscn` | Output format for mesh scenes: `tscn` (text, human-readable) or `res` (binary, more compact). |
+| `--filter` | None | Filter pattern for FBX filenames (case-insensitive). Only FBX files containing the pattern are processed. Example: `--filter Tree` |
 
 ---
 
@@ -266,6 +269,57 @@ For very large packs, increase the Godot CLI timeout:
 ```bash
 python converter.py ... --godot-timeout 1200  # 20 minutes
 ```
+
+### Mesh Grouping Options
+
+**Keep Meshes Together** - Save all meshes from one FBX as a single scene:
+
+```bash
+python converter.py ... --keep-meshes-together
+```
+
+This is useful when:
+- You want to preserve the original FBX hierarchy
+- A single FBX contains multiple related meshes (e.g., a building with doors and windows)
+- You prefer fewer scene files to manage
+
+Default behavior (without this flag) saves each mesh as a separate scene file, which is better for:
+- Modular asset usage (placing individual props)
+- Memory efficiency (loading only needed meshes)
+- Instancing many copies of individual meshes
+
+### Output Format Options
+
+**Binary Format** - Use compiled .res format instead of text .tscn:
+
+```bash
+python converter.py ... --mesh-format res
+```
+
+| Format | Extension | Pros | Cons |
+|--------|-----------|------|------|
+| `tscn` | .tscn | Human-readable, diff-friendly, editable | Larger file size |
+| `res` | .res | Smaller, faster to load | Binary, not editable |
+
+### Filter Option
+
+**Convert Only Specific Files** - Process only FBX files matching a pattern:
+
+```bash
+# Only convert tree-related assets
+python converter.py ... --filter Tree
+
+# Only convert vehicle assets
+python converter.py ... --filter Veh
+
+# Only convert character assets
+python converter.py ... --filter Chr
+```
+
+The filter is case-insensitive and matches anywhere in the FBX filename. This is useful for:
+- Testing conversion with a subset of assets
+- Converting only specific categories (trees, props, characters)
+- Faster iteration when debugging specific assets
 
 ---
 
