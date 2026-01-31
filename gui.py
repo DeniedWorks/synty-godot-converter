@@ -667,8 +667,6 @@ class SyntyConverterApp:
         source_files = Path(self.source_files_var.get())
         if not source_files.exists():
             errors.append(f"Source files directory not found: {source_files}")
-        elif not (source_files / "Textures").exists():
-            errors.append(f"Textures directory not found in: {source_files}")
 
         godot_exe = Path(self.godot_exe_var.get())
         if not godot_exe.exists():
