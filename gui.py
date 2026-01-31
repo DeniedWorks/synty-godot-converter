@@ -67,11 +67,11 @@ PATHS:
 
 OUTPUT OPTIONS:
 - Output Format:
-  - tscn (OFF): Human-readable scene files (default)
-  - res (ON): Compiled binary (smaller, faster to load)
+  - tscn: Human-readable scene files (default)
+  - res: Compiled binary (smaller, faster to load)
 - Mesh Mode:
-  - Separate (OFF): Each mesh becomes its own scene file (default)
-  - Combined (ON): All meshes from one FBX stay together
+  - Separate: Each mesh becomes its own scene file (default)
+  - Combined: All meshes from one FBX stay together
 
 FILTERS:
 - Filter by Name: Only convert files containing this text
@@ -272,81 +272,76 @@ class SyntyConverterApp:
         godot_browse.grid(row=row, column=2, pady=4)
 
     def _create_output_options(self, parent):
-        """Create the output format and mesh mode switches."""
+        """Create the output format and mesh mode segmented buttons."""
+        # Center container for the options
         options_frame = ctk.CTkFrame(parent, fg_color="transparent")
-        options_frame.pack(fill="x", pady=(0, 15))
+        options_frame.pack(pady=(0, 15), anchor="center")
 
-        # Output Format switch
-        format_frame = ctk.CTkFrame(options_frame, fg_color="transparent")
+        # Inner frame to hold both selectors side by side
+        selectors_frame = ctk.CTkFrame(options_frame, fg_color="transparent")
+        selectors_frame.pack(anchor="center")
+
+        # Output Format selector
+        format_frame = ctk.CTkFrame(selectors_frame, fg_color="transparent")
         format_frame.pack(side="left", padx=(0, 40))
 
         format_label = ctk.CTkLabel(
             format_frame,
             text="Output Format",
-            font=ctk.CTkFont(size=12, weight="bold")
+            font=ctk.CTkFont(size=16, weight="bold")
         )
-        format_label.pack(anchor="w")
+        format_label.pack(anchor="center")
 
-        format_hint = ctk.CTkLabel(
+        self.format_selector = ctk.CTkSegmentedButton(
             format_frame,
-            text="tscn <=> res",
-            font=ctk.CTkFont(size=11),
-            text_color="gray"
+            values=["tscn", "res"],
+            command=self._on_format_change
         )
-        format_hint.pack(anchor="w")
+        self.format_selector.set("tscn")  # default
+        self.format_selector.pack(anchor="center", pady=(5, 0))
 
-        self.format_switch_var = ctk.BooleanVar(value=False)  # OFF = tscn, ON = res
-        format_switch = ctk.CTkSwitch(
-            format_frame,
-            text="",
-            variable=self.format_switch_var,
-            onvalue=True,
-            offvalue=False,
-            width=40
-        )
-        format_switch.pack(anchor="w", pady=(3, 0))
-
-        # Mesh Mode switch
-        mesh_frame = ctk.CTkFrame(options_frame, fg_color="transparent")
+        # Mesh Mode selector
+        mesh_frame = ctk.CTkFrame(selectors_frame, fg_color="transparent")
         mesh_frame.pack(side="left")
 
         mesh_label = ctk.CTkLabel(
             mesh_frame,
             text="Mesh Mode",
-            font=ctk.CTkFont(size=12, weight="bold")
+            font=ctk.CTkFont(size=16, weight="bold")
         )
-        mesh_label.pack(anchor="w")
+        mesh_label.pack(anchor="center")
 
-        mesh_hint = ctk.CTkLabel(
+        self.mesh_mode_selector = ctk.CTkSegmentedButton(
             mesh_frame,
-            text="Separate <=> Combined",
-            font=ctk.CTkFont(size=11),
-            text_color="gray"
+            values=["Separate", "Combined"],
+            command=self._on_mesh_mode_change
         )
-        mesh_hint.pack(anchor="w")
+        self.mesh_mode_selector.set("Separate")  # default
+        self.mesh_mode_selector.pack(anchor="center", pady=(5, 0))
 
-        self.mesh_mode_switch_var = ctk.BooleanVar(value=False)  # OFF = separate, ON = combined
-        mesh_switch = ctk.CTkSwitch(
-            mesh_frame,
-            text="",
-            variable=self.mesh_mode_switch_var,
-            onvalue=True,
-            offvalue=False,
-            width=40
-        )
-        mesh_switch.pack(anchor="w", pady=(3, 0))
+    def _on_format_change(self, value: str):
+        """Handle output format selection change."""
+        pass  # Can add logging or other behavior if needed
+
+    def _on_mesh_mode_change(self, value: str):
+        """Handle mesh mode selection change."""
+        pass  # Can add logging or other behavior if needed
 
     def _create_filter_section(self, parent):
         """Create the filter input."""
         filter_frame = ctk.CTkFrame(parent, fg_color="transparent")
-        filter_frame.pack(fill="x", pady=(0, 15))
+        filter_frame.pack(pady=(0, 15), anchor="center")
 
-        filter_label = ctk.CTkLabel(filter_frame, text="Filter by Name:", anchor="w")
+        # Inner frame to hold label and entry together
+        filter_inner = ctk.CTkFrame(filter_frame, fg_color="transparent")
+        filter_inner.pack(anchor="center")
+
+        filter_label = ctk.CTkLabel(filter_inner, text="Filter by Name:", anchor="w")
         filter_label.pack(side="left")
 
         self.filter_var = ctk.StringVar()
         filter_entry = ctk.CTkEntry(
-            filter_frame,
+            filter_inner,
             textvariable=self.filter_var,
             placeholder_text='e.g. "Tree" or "Veh"',
             width=200
@@ -356,11 +351,11 @@ class SyntyConverterApp:
     def _create_advanced_options(self, parent):
         """Create the advanced options checkboxes and timeout slider."""
         advanced_frame = ctk.CTkFrame(parent, fg_color="transparent")
-        advanced_frame.pack(fill="x", pady=(0, 10))
+        advanced_frame.pack(pady=(0, 10), anchor="center")
 
         # Checkbox grid - row 1
         checkbox_frame1 = ctk.CTkFrame(advanced_frame, fg_color="transparent")
-        checkbox_frame1.pack(fill="x", pady=2)
+        checkbox_frame1.pack(anchor="center", pady=2)
 
         self.verbose_var = ctk.BooleanVar(value=False)
         verbose_cb = ctk.CTkCheckBox(
@@ -391,7 +386,7 @@ class SyntyConverterApp:
 
         # Checkbox grid - row 2
         checkbox_frame2 = ctk.CTkFrame(advanced_frame, fg_color="transparent")
-        checkbox_frame2.pack(fill="x", pady=2)
+        checkbox_frame2.pack(anchor="center", pady=2)
 
         self.skip_godot_cli_var = ctk.BooleanVar(value=False)
         skip_cli_cb = ctk.CTkCheckBox(
@@ -413,7 +408,7 @@ class SyntyConverterApp:
 
         # Timeout slider
         timeout_frame = ctk.CTkFrame(advanced_frame, fg_color="transparent")
-        timeout_frame.pack(fill="x", pady=(8, 0))
+        timeout_frame.pack(anchor="center", pady=(8, 0))
 
         timeout_label = ctk.CTkLabel(timeout_frame, text="Timeout:")
         timeout_label.pack(side="left")
@@ -688,11 +683,9 @@ class SyntyConverterApp:
         if not self._validate_inputs():
             return
 
-        # Build configuration from switches
-        # format_switch_var: OFF = tscn, ON = res
-        mesh_format = "res" if self.format_switch_var.get() else "tscn"
-        # mesh_mode_switch_var: OFF = separate (keep_meshes_together=False), ON = combined (keep_meshes_together=True)
-        keep_meshes_together = self.mesh_mode_switch_var.get()
+        # Build configuration from segmented buttons
+        mesh_format = self.format_selector.get()  # "tscn" or "res"
+        keep_meshes_together = self.mesh_mode_selector.get() == "Combined"
 
         config = ConversionConfig(
             unity_package=Path(self.unity_package_var.get()),
