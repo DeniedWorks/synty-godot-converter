@@ -117,14 +117,13 @@ class SyntyConverterApp:
         self.root.geometry(DEFAULT_WINDOW_SIZE)
 
         # Center window on screen
-        self.root.update_idletasks()
-        width = self.root.winfo_width()
-        height = self.root.winfo_height()
+        width = 1080
+        height = 640
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
         x = (screen_width - width) // 2
         y = (screen_height - height) // 2
-        self.root.geometry(f"+{x}+{y}")
+        self.root.geometry(f"{width}x{height}+{x}+{y}")
 
         # State variables
         self.conversion_thread: threading.Thread | None = None
