@@ -15,7 +15,7 @@ Usage:
         --verbose
 
 Pipeline Steps:
-    1. Validate inputs (package exists, source-files has Textures/, godot exists)
+    1. Validate inputs (package exists, source-files directory exists, godot exists)
     2. Create output directory structure
     3. Extract Unity package
     4. Parse all .mat files
@@ -64,17 +64,21 @@ logger = logging.getLogger(__name__)
 
 
 def has_source_assets_recursive(path: Path) -> bool:
-    """Check if a path contains any MaterialList, FBX, Models, or Textures anywhere in tree.
+    """Check if a path contains any MaterialList, FBX, or Models anywhere in tree.
 
     This is used to validate that the source_files path contains usable assets,
     even if they are nested in subdirectories (like Dwarven Dungeon structure).
+
+    Note: Textures are primarily extracted from .unitypackage files, so Textures
+    directories are not required for validation. SourceFiles/Textures is used
+    as an optional fallback only.
 
     Args:
         path: Directory to search recursively.
 
     Returns:
-        True if any MaterialList*.txt, FBX directory, Models directory, or
-        Textures directory exists anywhere in the tree.
+        True if any MaterialList*.txt, FBX directory, or Models directory
+        exists anywhere in the tree.
     """
     # Check for MaterialList files
     if list(path.rglob("MaterialList*.txt")):
@@ -90,10 +94,8 @@ def has_source_assets_recursive(path: Path) -> bool:
         if item.is_dir():
             return True
 
-    # Check for Textures directories
-    for item in path.rglob("Textures"):
-        if item.is_dir():
-            return True
+    # Note: Textures directories are NOT required - textures come from .unitypackage
+    # SourceFiles/Textures is optional fallback only
 
     return False
 
@@ -119,7 +121,7 @@ def resolve_source_files_path(source_files: Path) -> Path:
         return source_files
 
     # Log warning if no assets found
-    logger.warning("No MaterialList, FBX, or Textures found in: %s", source_files)
+    logger.warning("No MaterialList, FBX, or Models found in: %s", source_files)
     return source_files
 
 
@@ -241,8 +243,9 @@ class ConversionConfig:
 
     Attributes:
         unity_package: Path to the .unitypackage file to convert. Must exist.
-        source_files: Path to SourceFiles directory containing Textures/ and FBX/
-            subdirectories. The Textures/ subdirectory must exist.
+        source_files: Path to SourceFiles directory containing FBX/ and optionally
+            Textures/ subdirectories. Textures primarily come from the .unitypackage
+            file; SourceFiles/Textures is used as an optional fallback.
         output_dir: Output directory for converted Godot assets. Will be created
             if it does not exist.
         godot_exe: Path to Godot 4.6 executable for CLI operations. Must exist.
@@ -400,7 +403,7 @@ Examples:
         "--source-files",
         type=Path,
         required=True,
-        help="Path to SourceFiles folder containing Textures/ and FBX/",
+        help="Path to SourceFiles folder containing FBX/ (Textures/ optional - textures come from .unitypackage)",
     )
     parser.add_argument(
         "--output",
@@ -479,16 +482,19 @@ Examples:
     # Resolve nested SourceFiles folder structure (e.g., PackName_SourceFiles_v2/SourceFiles/)
     resolved_source_files = resolve_source_files_path(args.source_files)
 
-    # Check for Textures directory - can be at root or anywhere in tree (for complex structures)
+    # Note: Textures directory is optional - textures primarily come from .unitypackage
+    # SourceFiles/Textures is used as a fallback only
     textures_dir = resolved_source_files / "Textures"
     if not textures_dir.exists():
         # Try to find any Textures directory recursively
         texture_dirs = list(resolved_source_files.rglob("Textures"))
         texture_dirs = [d for d in texture_dirs if d.is_dir()]
         if not texture_dirs:
-            parser.error(
-                f"No Textures directory found in {resolved_source_files} or its subdirectories. "
-                f"Expected 'Textures/' folder containing texture files."
+            # This is just a warning now, not an error - textures come from .unitypackage
+            logger.warning(
+                "No Textures directory found in %s or its subdirectories. "
+                "Textures will be extracted from .unitypackage only.",
+                resolved_source_files
             )
 
     if not args.godot.exists():
@@ -868,7 +874,7 @@ def copy_textures(
 
                 fallback_count += 1
             else:
-                logger.warning("Texture not found (no fallback): %s", texture_name)
+                logger.warning("Texture not found in package or SourceFiles: %s", texture_name)
                 missing += 1
             continue
 
@@ -1861,15 +1867,19 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
         )
 
         # Step 8: Copy required textures
+        # Textures primarily come from .unitypackage extraction (texture_guid_to_path)
+        # SourceFiles/Textures is used as optional fallback for any missing textures
         logger.info("Copying texture files...")
-        # Find all Textures directories recursively for complex nested structures
+        # Find all Textures directories recursively for complex nested structures (optional fallback)
         texture_dirs = [config.source_files / "Textures"]
         if not texture_dirs[0].exists():
             texture_dirs = [d for d in config.source_files.rglob("Textures") if d.is_dir()]
             if texture_dirs:
-                logger.info("Found %d Textures directories in nested structure", len(texture_dirs))
+                logger.info("Found %d Textures directories as fallback sources", len(texture_dirs))
                 for td in texture_dirs:
                     logger.debug("  Textures dir: %s", td)
+            else:
+                logger.info("No SourceFiles/Textures found - using .unitypackage textures only")
         source_textures = texture_dirs[0] if texture_dirs else config.source_files / "Textures"
         # Additional texture directories (all except the primary one)
         additional_texture_dirs = texture_dirs[1:] if len(texture_dirs) > 1 else None
