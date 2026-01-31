@@ -275,7 +275,7 @@ class SyntyConverterApp:
         """Create the output format and mesh mode segmented buttons."""
         # Center container for the options
         options_frame = ctk.CTkFrame(parent, fg_color="transparent")
-        options_frame.pack(pady=(0, 15), anchor="center")
+        options_frame.pack(pady=(20, 15), anchor="center")
 
         # Inner frame to hold both selectors side by side
         selectors_frame = ctk.CTkFrame(options_frame, fg_color="transparent")
