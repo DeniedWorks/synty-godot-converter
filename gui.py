@@ -45,7 +45,7 @@ from converter import ConversionConfig, ConversionStats, run_conversion
 # --- Constants ---
 
 APP_TITLE = "SYNTY CONVERTER"
-APP_VERSION = "1.0.0"
+APP_VERSION = "2.0.0"
 DEFAULT_WINDOW_SIZE = "1080x640"
 
 # Default paths
