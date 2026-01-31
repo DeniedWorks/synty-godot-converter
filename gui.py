@@ -625,19 +625,28 @@ class SyntyConverterApp:
         self.log_text.configure(state="disabled")
 
     def _setup_logging(self):
-        """Set up logging to capture converter output."""
-        # Create queue handler for the converter's logger
+        """Set up logging to capture converter output.
+        
+        We configure logging to only go to our GUI queue handler,
+        not to stdout. This prevents duplicate log messages.
+        """
+        # Create queue handler for capturing log messages
         self.queue_handler = QueueHandler(self.log_queue)
         self.queue_handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
 
-        # Get the converter's logger and add our handler
+        # Configure the converter's logger
         converter_logger = logging.getLogger("converter")
+        converter_logger.handlers.clear()  # Remove any existing handlers
         converter_logger.addHandler(self.queue_handler)
         converter_logger.setLevel(logging.DEBUG)
+        converter_logger.propagate = False  # Don't send to root logger
 
-        # Also capture the root logger for any other messages
+        # Configure root logger to only use our queue handler
+        # This captures any other log messages from dependencies
         root_logger = logging.getLogger()
+        root_logger.handlers.clear()  # Remove default StreamHandler
         root_logger.addHandler(self.queue_handler)
+        root_logger.setLevel(logging.DEBUG)
 
     def _process_log_queue(self):
         """Process messages from the log queue and display them."""

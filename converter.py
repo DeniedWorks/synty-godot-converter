@@ -1946,31 +1946,34 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
                 logger.info("Generated mesh_material_mapping.json")
 
             # Step 9.5: Check for missing material references (no placeholders - just warn)
-            logger.info("Checking for missing material references...")
-            materials_dir = pack_output_dir / "materials"
-            existing_materials = {f.stem for f in materials_dir.glob("*.tres")}
+            if not config.dry_run:
+                logger.info("Checking for missing material references...")
+                materials_dir = pack_output_dir / "materials"
+                existing_materials = {f.stem for f in materials_dir.glob("*.tres")}
 
-            # Collect all referenced materials from prefabs
-            referenced_materials: set[str] = set()
-            for prefab in prefabs:
-                for mesh in prefab.meshes:
-                    for slot in mesh.slots:
-                        if slot.material_name:
-                            referenced_materials.add(slot.material_name)
+                # Collect all referenced materials from prefabs
+                referenced_materials: set[str] = set()
+                for prefab in prefabs:
+                    for mesh in prefab.meshes:
+                        for slot in mesh.slots:
+                            if slot.material_name:
+                                referenced_materials.add(slot.material_name)
 
-            # Find missing materials - just warn, don't create placeholders
-            missing_materials = referenced_materials - existing_materials
-            stats.materials_missing = len(missing_materials)
+                # Find missing materials - just warn, don't create placeholders
+                missing_materials = referenced_materials - existing_materials
+                stats.materials_missing = len(missing_materials)
 
-            if missing_materials:
-                logger.warning(
-                    "Found %d missing material(s) - these meshes will use default materials:",
-                    len(missing_materials)
-                )
-                for mat_name in sorted(missing_materials):
-                    logger.warning("  Missing: %s", mat_name)
+                if missing_materials:
+                    logger.warning(
+                        "Found %d missing material(s) - these meshes will use default materials:",
+                        len(missing_materials)
+                    )
+                    for mat_name in sorted(missing_materials):
+                        logger.warning("  Missing: %s", mat_name)
+                else:
+                    logger.info("All referenced materials exist")
             else:
-                logger.info("All referenced materials exist")
+                logger.info("Skipping missing materials check (dry run)")
         else:
             logger.info("No MaterialList data available, skipping mesh-material mapping")
 
