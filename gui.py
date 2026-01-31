@@ -353,6 +353,37 @@ class SyntyConverterApp:
         advanced_frame = ctk.CTkFrame(parent, fg_color="transparent")
         advanced_frame.pack(pady=(0, 10), anchor="center")
 
+        # Timeout slider (placed first, right after filter)
+        timeout_frame = ctk.CTkFrame(advanced_frame, fg_color="transparent")
+        timeout_frame.pack(anchor="center", pady=(0, 0))
+
+        timeout_label = ctk.CTkLabel(timeout_frame, text="Timeout:")
+        timeout_label.pack(side="left")
+
+        self.timeout_var = ctk.IntVar(value=600)
+        timeout_slider = ctk.CTkSlider(
+            timeout_frame,
+            from_=60,
+            to=1800,
+            number_of_steps=58,
+            variable=self.timeout_var,
+            width=180,
+            command=self._update_timeout_label
+        )
+        timeout_slider.pack(side="left", padx=10)
+
+        self.timeout_value_label = ctk.CTkLabel(
+            timeout_frame,
+            text="600s",
+            width=50
+        )
+        self.timeout_value_label.pack(side="left")
+
+        # Spacer between timeout and checkboxes
+        spacer_frame = ctk.CTkFrame(advanced_frame, fg_color="transparent", height=15)
+        spacer_frame.pack(fill="x")
+        spacer_frame.pack_propagate(False)
+
         # Checkbox grid - row 1
         checkbox_frame1 = ctk.CTkFrame(advanced_frame, fg_color="transparent")
         checkbox_frame1.pack(anchor="center", pady=2)
@@ -405,32 +436,6 @@ class SyntyConverterApp:
             width=140
         )
         skip_import_cb.pack(side="left")
-
-        # Timeout slider
-        timeout_frame = ctk.CTkFrame(advanced_frame, fg_color="transparent")
-        timeout_frame.pack(anchor="center", pady=(8, 0))
-
-        timeout_label = ctk.CTkLabel(timeout_frame, text="Timeout:")
-        timeout_label.pack(side="left")
-
-        self.timeout_var = ctk.IntVar(value=600)
-        timeout_slider = ctk.CTkSlider(
-            timeout_frame,
-            from_=60,
-            to=1800,
-            number_of_steps=58,
-            variable=self.timeout_var,
-            width=180,
-            command=self._update_timeout_label
-        )
-        timeout_slider.pack(side="left", padx=10)
-
-        self.timeout_value_label = ctk.CTkLabel(
-            timeout_frame,
-            text="600s",
-            width=50
-        )
-        self.timeout_value_label.pack(side="left")
 
     def _create_log_panel(self, parent):
         """Create the log output panel."""
