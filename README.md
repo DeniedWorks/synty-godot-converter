@@ -4,20 +4,47 @@ Convert Synty Studios Unity asset packs to Godot 4.6 with full shader support.
 
 ## Features
 
+- **Modern GUI** - User-friendly CustomTkinter interface with drag & drop support
 - **Automatic shader detection** - Identifies Polygon, Foliage, Crystal, Water, Clouds, Particles, and Skydome materials
 - **3-tier shader detection** - GUID lookup (50+ known shaders), name pattern matching, property-based analysis
 - **Full material conversion** - Parses Unity .mat files and generates Godot ShaderMaterial .tres files
 - **Texture handling** - Copies only required textures, supports PNG/TGA/JPG
 - **FBX mesh conversion** - Imports FBX models via Godot CLI with materials pre-assigned
 - **Global shader uniforms** - Generates project.godot with wind, sky, and water parameters
-- **Zero dependencies** - Uses only Python standard library
+- **Pack browser** - Scan directories to discover and batch-convert Synty packs
+- **Real-time logging** - Live conversion progress with detailed output
 
 ## Requirements
 
-- **Python 3.10+** (no pip packages required)
+- **Python 3.10+**
 - **Godot 4.6** (mono or standard)
 
+### GUI Requirements (optional)
+
+For the graphical interface, install additional dependencies:
+
+```bash
+pip install -r requirements-gui.txt
+```
+
 ## Quick Start
+
+### GUI Mode
+
+Launch the graphical interface:
+
+```bash
+python gui.py
+```
+
+The GUI provides:
+- Pack browser to discover Synty packs in a directory
+- Drag & drop support for .unitypackage files
+- All CLI options as easy-to-use widgets
+- Real-time conversion log output
+- Statistics display for materials, textures, and meshes
+
+### Command Line
 
 ```bash
 python converter.py \
