@@ -399,10 +399,12 @@ func extract_and_save_mesh(mesh_instance: MeshInstance3D, relative_dir: String, 
 	var materials_dir := current_pack_folder + "/materials"
 	for i in range(original_mesh.get_surface_count()):
 		if i < material_names.size() and material_names[i] != "":
-			var material_path := "%s/%s.tres" % [materials_dir, material_names[i]]
+			var mat_name := material_names[i]
+			# Use fallback logic to find material (handles prefix mismatches)
+			var material_path := find_material_path(mat_name, materials_dir)
 
-			if not ResourceLoader.exists(material_path):
-				print("      Warning: Material not found: %s" % material_path)
+			if material_path.is_empty():
+				print("      Warning: Material not found: %s (tried fallbacks)" % mat_name)
 				warnings += 1
 				continue
 
@@ -521,6 +523,59 @@ func _strip_numeric_suffix(name: String) -> String:
 	var regex := RegEx.new()
 	regex.compile("(_?\\d+)$")
 	return regex.sub(name, "")
+
+
+## Tries to find a material file with fallback for naming mismatches.
+## MaterialList.txt often references materials with full prefixes like
+## "PolygonFantasyKingdom_Mat_Castle_Wall_01" but the generated .tres files
+## are named with just the suffix part like "Castle_Wall_01.tres".
+##
+## Fallback order:
+## 1. Exact name match
+## 2. Strip Polygon*_Mat_ prefix (e.g., PolygonFantasyKingdom_Mat_Glass -> Glass)
+## 3. Strip Polygon*_ prefix (e.g., PolygonNature_Tree -> Tree)
+## 4. Try with _01 suffix if not already present
+##
+## @param mat_name The material name from the mapping (may have full prefix).
+## @param materials_dir Path to the materials directory to search in.
+## @returns String Full path to the material file if found, empty string otherwise.
+func find_material_path(mat_name: String, materials_dir: String) -> String:
+	var base_path := materials_dir.path_join(mat_name + ".tres")
+
+	# 1. Try exact name
+	# NOTE: Use ResourceLoader.exists() instead of FileAccess.file_exists() for res:// paths.
+	# FileAccess.file_exists() has known issues with resource paths, especially:
+	# - During headless execution in _init()
+	# - With .remap files created by Godot's import system
+	if ResourceLoader.exists(base_path):
+		return base_path
+
+	# 2. Strip Polygon*_Mat_ or Polygon*_ prefix
+	var stripped := mat_name
+	if stripped.begins_with("Polygon"):
+		# Try to find _Mat_ first (e.g., PolygonFantasyKingdom_Mat_Glass -> Glass)
+		var mat_idx := stripped.find("_Mat_")
+		if mat_idx > 0:
+			stripped = stripped.substr(mat_idx + 5)  # len("_Mat_") = 5
+		else:
+			# Try just first underscore after Polygon prefix (e.g., PolygonNature_Tree -> Tree)
+			var first_underscore := stripped.find("_")
+			if first_underscore > 0:
+				stripped = stripped.substr(first_underscore + 1)
+
+	# 3. Try stripped name
+	var stripped_path := materials_dir.path_join(stripped + ".tres")
+	if ResourceLoader.exists(stripped_path):
+		return stripped_path
+
+	# 4. Try with _01 suffix if not already present
+	if not stripped.ends_with("_01"):
+		var with_suffix_path := materials_dir.path_join(stripped + "_01.tres")
+		if ResourceLoader.exists(with_suffix_path):
+			return with_suffix_path
+
+	# 5. Not found
+	return ""
 
 
 ## Ensures a directory exists, creating it recursively if necessary.

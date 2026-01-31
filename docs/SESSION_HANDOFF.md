@@ -6,7 +6,118 @@
 
 ---
 
-## What Was Accomplished (P0 - Critical Fixes)
+## What Was Done This Session (2026-01-30)
+
+### 1. Shader Property Validation (COMMITTED: 14243a7)
+
+**Location:** `shader_mapping.py`
+
+**THE PROBLEM:**
+Old Synty packs (like PolygonNature) mark materials as "Uses custom shader" in MaterialList.txt, so our name-based detection correctly identifies them as foliage/water/etc. However, the Unity `.mat` files in these older packs only have generic properties like `_MainTex` and `_BumpMap` - they do NOT have shader-specific properties like `_Leaf_Texture` or `_Trunk_Texture`.
+
+This caused a silent failure: we assigned `foliage.gdshader` to these materials (correct shader choice), but the texture mapping failed because `foliage.gdshader` expects a `leaf_color` uniform, while the material only had data for `base_texture` (from `_MainTex`). Result: textures did not display even though the shader was correct.
+
+**THE SOLUTION:**
+Before applying a specialized shader, we now validate that the material actually HAS any shader-specific properties. If the material only has generic Unity properties (`_MainTex`, `_BumpMap`, `_Color`), we fall back to `polygon.gdshader` which correctly handles those generic properties.
+
+**Implementation:**
+- Added `SHADER_SPECIFIC_PROPERTIES` dict defining unique properties per shader:
+  - `foliage`: `_Leaf_Texture`, `_Trunk_Texture`, `_Leaf_Color`, etc.
+  - `crystal`: `_Crystal_Color`, `_Fresnel_*`, `_Refraction_*`, etc.
+  - `water`: `_Water_Color`, `_Shallow_Color`, `_Depth_*`, etc.
+  - `particles`: `_Soft_Factor`, `_Camera_Fade_*`, etc.
+  - `skydome`: `_Sky_Color_*`, `_Sun_*`, `_Cloud_*`, etc.
+  - `clouds`: `_Cloud_*`, `_Edge_*`, etc.
+
+- Added `validate_shader_properties()` function to check if materials have shader-specific properties
+- Materials detected as specialized shaders via name patterns now validate they have proper properties
+- If no shader-specific properties found, falls back to `polygon.gdshader`
+
+### 2. Transparency/Alpha Fix (COMMITTED: 2bbac05)
+
+**Location:** `shader_mapping.py`
+
+**THE PROBLEM:**
+The converter had an "alpha fix" that changed `alpha=0` to `alpha=1.0` for all color values. This was originally intended to fix a Unity quirk where opaque materials store colors with `alpha=0` even though they should be fully opaque.
+
+However, glass and transparent materials INTENTIONALLY have low alpha values (e.g., 0.23-0.47) for transparency. The blanket fix was overwriting these intentional alpha values, making glass materials appear opaque instead of transparent.
+
+**THE SOLUTION:**
+Unity's `_Mode` property tells us the intended rendering mode:
+- `0` = Opaque (alpha fix needed - Unity stores with alpha=0)
+- `1` = Cutout (transparent, preserve alpha)
+- `2` = Fade (transparent, preserve alpha)
+- `3` = Transparent (transparent, preserve alpha)
+
+If `_Mode >= 1`, we skip the alpha fix and preserve the original alpha value. This allows glass, windows, and other transparent materials to render correctly while still fixing the alpha=0 issue for opaque materials.
+
+**Implementation:**
+- Check `_Mode` property before applying alpha fix
+- Only apply "alpha=0 -> alpha=1.0" fix when `_Mode == 0` (Opaque) or `_Mode` is not set
+- Materials with `_Mode >= 1` now preserve original alpha values
+- This fixes glass, windows, cutout leaves, and fade particles appearing opaque
+
+### 3. Material Name Fallback (IN PROGRESS - needs commit)
+
+**Location:** `godot_converter.gd`
+
+**THE PROBLEM:**
+Synty has inconsistent naming between MaterialList.txt and their Unity `.mat` files:
+
+| Source | Example Name |
+|--------|--------------|
+| MaterialList.txt references | `PolygonFantasyKingdom_Mat_Castle_Wall_01` |
+| Unity `.mat` file `m_Name` | `Castle_Wall_01` |
+
+The Python converter generates `.tres` files using the short name from the `.mat` file (e.g., `Castle_Wall_01.tres`). But when the GDScript tries to apply materials to meshes, it looks for the long name from MaterialList.txt. Result: material files exist but are not found because of the name mismatch.
+
+**THE SOLUTION:**
+Added a fallback chain in `godot_converter.gd` that tries multiple name variations:
+
+1. **Exact name match** - Try the name as-is from MaterialList.txt
+2. **Strip prefix** - Remove `Polygon*_Mat_` or `Polygon*_` prefix patterns
+3. **Add suffix** - Try with `_01` suffix if not already present (some materials reference base name without variant number)
+
+**Secondary fix:** Changed `FileAccess.file_exists()` to `ResourceLoader.exists()` because `FileAccess` does not work with `res://` paths when running Godot in headless/CLI mode. `ResourceLoader.exists()` is the correct API for checking if resources exist at `res://` paths.
+
+**Implementation:**
+- Added `find_material_path()` function with the fallback chain
+- Uses regex to strip pack-specific prefixes: `r"^Polygon[A-Za-z]+_(Mat_)?"`
+- Result: Fantasy Kingdom improved from 511 meshes without materials to only 171 (edge cases)
+
+### 4. Created analyze_multi_materials.py Utility Script
+
+**Location:** `analyze_multi_materials.py` (new file)
+
+- Analyzes MaterialList.txt files to find prefabs with 2+ materials
+- Helps identify naming patterns for leaves vs trunk materials
+
+---
+
+## Current State
+
+- synty-converter has uncommitted changes in `godot_converter.gd` (the material fallback fix)
+- 4 packs converted and ready for testing:
+  - `C:\Godot\Projects\PolygonNature` (working)
+  - `C:\Godot\Projects\EnchantedForest` (working)
+  - `C:\Godot\Projects\SciFiCity` (working, glass now transparent)
+  - `C:\Godot\Projects\FantasyKingdom` (working, 171 meshes still need materials)
+
+---
+
+## What's Next / Remaining Issues
+
+1. **Commit the godot_converter.gd changes**
+2. **171 meshes without materials in Fantasy Kingdom are edge cases:**
+   - `*_Static` variants (not in MaterialList)
+   - FX/particle meshes
+   - Some preset/composite meshes
+3. **Older packs (PolygonNature) have static foliage** - could add name-based forcing for "Leaves" materials
+4. **Could investigate why some materials still don't match**
+
+---
+
+## Previous Session: What Was Accomplished (P0 - Critical Fixes)
 
 ### 1. Output Structure Change - DONE
 
@@ -117,7 +228,7 @@ Added mappings for texture properties that trigger auto-enable:
 
 ---
 
-## What Was Accomplished (P1 - Property Verification) - DONE
+## Previous Session: What Was Accomplished (P1 - Property Verification) - DONE
 
 ### P1 - Verify ALL Unity Properties - COMPLETED 2026-01-30
 
@@ -209,9 +320,24 @@ python extract_unity_properties.py "C:\SyntyComplete\YOUR_PACK.unitypackage"
 
 ---
 
+## Key Files Modified This Session (2026-01-30)
+
+| File | Changes |
+|------|---------|
+| `shader_mapping.py` | Added `SHADER_SPECIFIC_PROPERTIES` dict, `validate_shader_properties()` function, fixed alpha handling for transparent materials |
+| `godot_converter.gd` | Added `find_material_path()` fallback function, fixed `ResourceLoader.exists()` usage |
+| `analyze_multi_materials.py` | New utility script for analyzing multi-material prefabs |
+
+---
+
 ## What Still Needs To Be Done
 
-### P2 - Polish Items - DONE
+### Immediate (Next Session)
+
+1. **Commit godot_converter.gd changes** - Material name fallback fix is uncommitted
+2. **Address remaining 171 meshes in Fantasy Kingdom** - Edge cases like `*_Static` variants
+
+### P2 - Polish Items - DONE (Previous Session)
 
 1. **High-quality texture imports** - DONE
    - Generate `.import` files for each texture with VRAM compressed + high_quality
@@ -225,7 +351,7 @@ python extract_unity_properties.py "C:\SyntyComplete\YOUR_PACK.unitypackage"
    - Added `materials_missing: int = 0` field to `ConversionStats`
    - Counter incremented in Step 9.5 after calculating missing materials
 
-### P2.5 - Output Structure Simplification - DONE
+### P2.5 - Output Structure Simplification - DONE (Previous Session)
 
 Simplified output to one consistent structure:
 
@@ -254,32 +380,28 @@ output/
 - `0c126bc` - Simplify output structure
 - `98e0f85` - Remove shaders/ from pack folder
 
-### P3 - Testing (NOT DONE)
+### P3 - Testing - PARTIALLY DONE
 
-1. Run converter on actual packs to verify:
-   - Textures render correctly (not pink/gray)
-   - Shader detection works (foliage animates, crystals refract)
-   - LOD inheritance works
-   - Auto-enable rules trigger correctly
+**Tested packs:**
+- `PolygonNature` - working
+- `EnchantedForest` - working
+- `SciFiCity` - working, glass now transparent
+- `FantasyKingdom` - working, 171 meshes still need materials
 
-2. Test packs to prioritize:
-   - `PolygonNature` - has foliage, water, triplanar terrain
-   - `PolygonFantasyKingdom` - has crystals
-   - `PolygonSciFi` - has emission, holograms
-
-3. **BUG FIXED - Shader Texture Mapping Gaps (2026-01-30):**
-   - SM_Plant materials were getting correct shader (foliage.gdshader) but textures didn't display
-   - Root cause: Common Unity properties (`_MainTex`, `_BaseMap`, `_BumpMap`) weren't mapped for shader-specific uniforms
-   - **Fixes applied to `shader_mapping.py`:**
-     - FOLIAGE: Added `_MainTex`→`leaf_color`, `_BaseMap`→`leaf_color`, `_BumpMap`→`leaf_normal`, `_EmissionMap`→`emissive_mask`
-     - CRYSTAL: Added `_BaseMap`→`base_albedo`
-     - WATER: Fixed 11 mappings using wrong uniform names (`water_normal_texture`→`normal_texture`, `foam_noise_texture`→`noise_texture`)
-     - PARTICLES: Removed invalid `_EmissionMap` mapping, added `_BaseMap`→`albedo_map`
-     - SKYDOME: Cleared to empty dict (shader is procedural, no texture uniforms)
+**Previous bugs fixed:**
+- **Shader Texture Mapping Gaps (2026-01-30):**
+  - SM_Plant materials were getting correct shader (foliage.gdshader) but textures didn't display
+  - Root cause: Common Unity properties (`_MainTex`, `_BaseMap`, `_BumpMap`) weren't mapped for shader-specific uniforms
+  - **Fixes applied to `shader_mapping.py`:**
+    - FOLIAGE: Added `_MainTex`→`leaf_color`, `_BaseMap`→`leaf_color`, `_BumpMap`→`leaf_normal`, `_EmissionMap`→`emissive_mask`
+    - CRYSTAL: Added `_BaseMap`→`base_albedo`
+    - WATER: Fixed 11 mappings using wrong uniform names (`water_normal_texture`→`normal_texture`, `foam_noise_texture`→`noise_texture`)
+    - PARTICLES: Removed invalid `_EmissionMap` mapping, added `_BaseMap`→`albedo_map`
+    - SKYDOME: Cleared to empty dict (shader is procedural, no texture uniforms)
 
 ---
 
-## Key Files Modified This Session
+## Key Files Modified Previous Sessions
 
 | File | Changes |
 |------|---------|
@@ -438,7 +560,10 @@ I'm continuing work on the synty-converter project at C:\Godot\Projects\synty-co
 
 Please read the handoff document at C:\Godot\Projects\synty-converter\docs\SESSION_HANDOFF.md for full context.
 
-The main task remaining is to verify ALL Unity properties from ALL .unitypackage files in C:\SyntyComplete\ and ensure the shader_mapping.py has complete coverage.
+Immediate tasks:
+1. Commit the uncommitted changes in godot_converter.gd (material name fallback fix)
+2. Address the remaining 171 meshes without materials in Fantasy Kingdom (edge cases like *_Static variants)
+3. Consider adding name-based forcing for "Leaves" materials in older packs like PolygonNature
 ```
 
 ---
