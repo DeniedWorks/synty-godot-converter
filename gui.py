@@ -49,9 +49,9 @@ APP_VERSION = "2.0.0"
 DEFAULT_WINDOW_SIZE = "1080x640"
 
 # Default paths
-DEFAULT_SYNTY_PATH = r"C:\SyntyComplete"
-DEFAULT_GODOT_PATH = r"C:\Godot\Godot_v4.6-stable_mono_win64\Godot_v4.6-stable_mono_win64.exe"
-DEFAULT_OUTPUT_PATH = r"C:\Godot\Projects\converted-assets"
+DEFAULT_SYNTY_PATH = ""
+DEFAULT_GODOT_PATH = ""
+DEFAULT_OUTPUT_PATH = ""
 
 # Logging queue check interval (ms)
 LOG_QUEUE_INTERVAL = 50
