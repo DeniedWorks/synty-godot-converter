@@ -62,6 +62,63 @@ from material_list import (
 
 logger = logging.getLogger(__name__)
 
+
+def resolve_source_files_path(source_files: Path) -> Path:
+    """Resolve the actual SourceFiles path, handling nested folder structures.
+
+    Synty packs sometimes have nested structures like:
+        POLYGON_PackName_SourceFiles_v2/
+            SourceFiles/
+                FBX/
+                Textures/
+                MaterialList*.txt
+
+    Instead of the expected:
+        PackName/
+            SourceFiles/
+                FBX/
+                Textures/
+
+    This function checks if the given path contains the expected structure
+    (FBX/ or Textures/ subdirectories), and if not, looks for a nested
+    SourceFiles folder that does.
+
+    Args:
+        source_files: Path provided by the user as --source-files argument.
+
+    Returns:
+        The resolved path to the actual SourceFiles directory containing
+        FBX/ and/or Textures/ subdirectories. If a nested SourceFiles folder
+        is found with the expected structure, returns that path. Otherwise,
+        returns the original path (which will fail validation later with
+        a clear error message).
+
+    Example:
+        >>> # User points to outer folder
+        >>> resolve_source_files_path(Path("POLYGON_Forest_SourceFiles_v2"))
+        Path("POLYGON_Forest_SourceFiles_v2/SourceFiles")  # Nested folder found
+
+        >>> # User points to correct folder
+        >>> resolve_source_files_path(Path("PolygonNature/SourceFiles"))
+        Path("PolygonNature/SourceFiles")  # Already correct
+    """
+    # Check if current path has the expected structure (FBX/ or Textures/)
+    if (source_files / "FBX").exists() or (source_files / "Textures").exists():
+        return source_files
+
+    # Look for nested SourceFiles folder
+    nested = source_files / "SourceFiles"
+    if nested.exists() and ((nested / "FBX").exists() or (nested / "Textures").exists()):
+        logger.info(
+            "Detected nested SourceFiles folder structure, using: %s",
+            nested
+        )
+        return nested
+
+    # Return original path (will fail validation later with clear error)
+    return source_files
+
+
 # Shader files to copy from project's shaders/ directory
 SHADER_FILES = [
     "clouds.gdshader",
@@ -415,7 +472,10 @@ Examples:
     if not args.source_files.exists():
         parser.error(f"Source files directory not found: {args.source_files}")
 
-    textures_dir = args.source_files / "Textures"
+    # Resolve nested SourceFiles folder structure (e.g., PackName_SourceFiles_v2/SourceFiles/)
+    resolved_source_files = resolve_source_files_path(args.source_files)
+
+    textures_dir = resolved_source_files / "Textures"
     if not textures_dir.exists():
         parser.error(f"Textures directory not found: {textures_dir}")
 
@@ -424,7 +484,7 @@ Examples:
 
     return ConversionConfig(
         unity_package=args.unity_package.resolve(),
-        source_files=args.source_files.resolve(),
+        source_files=resolved_source_files.resolve(),
         output_dir=args.output.resolve(),
         godot_exe=args.godot.resolve(),
         dry_run=args.dry_run,
