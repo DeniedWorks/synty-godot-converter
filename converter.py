@@ -584,7 +584,7 @@ def copy_shaders(shaders_dest: Path, dry_run: bool) -> int:
             continue
 
         if dry_run:
-            logger.info("[DRY RUN] Would copy shader: %s -> %s", source_path, dest_path)
+            logger.debug("[DRY RUN] Would copy shader: %s -> %s", source_path, dest_path)
         else:
             shutil.copy2(source_path, dest_path)
             logger.debug("Copied shader: %s", shader_file)
@@ -831,7 +831,7 @@ def copy_textures(
             dest_path = output_textures / texture_name
 
             if dry_run:
-                logger.info("[DRY RUN] Would copy texture from temp: %s", texture_name)
+                logger.debug("[DRY RUN] Would copy texture from temp: %s", texture_name)
             else:
                 shutil.copy2(temp_path, dest_path)
                 generate_texture_import_file(dest_path)
@@ -860,7 +860,7 @@ def copy_textures(
                 dest_path = output_textures / dest_name
 
                 if dry_run:
-                    logger.info(
+                    logger.debug(
                         "[DRY RUN] Would copy fallback texture: %s -> %s (for missing %s)",
                         fallback_texture.name, dest_name, texture_name
                     )
@@ -890,7 +890,7 @@ def copy_textures(
         dest_path = output_textures / dest_name
 
         if dry_run:
-            logger.info("[DRY RUN] Would copy texture: %s -> %s", source_path.name, dest_name)
+            logger.debug("[DRY RUN] Would copy texture: %s -> %s", source_path.name, dest_name)
         else:
             shutil.copy2(source_path, dest_path)
             generate_texture_import_file(dest_path)
@@ -1028,7 +1028,7 @@ def copy_fbx_files(
                 continue
 
         if dry_run:
-            logger.info("[DRY RUN] Would copy FBX: %s", relative_path)
+            logger.debug("[DRY RUN] Would copy FBX: %s", relative_path)
             copied += 1
         else:
             # Ensure parent directory exists
@@ -1845,7 +1845,7 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
                 output_path = materials_dir / filename
 
                 if config.dry_run:
-                    logger.info("[DRY RUN] Would write material: %s", output_path)
+                    logger.debug("[DRY RUN] Would write material: %s", output_path)
                 else:
                     write_tres_file(tres_content, output_path)
                     logger.debug("Wrote material: %s", filename)
