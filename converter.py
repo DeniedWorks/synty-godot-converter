@@ -651,8 +651,85 @@ def setup_output_directories(output_dir: Path, dry_run: bool) -> None:
             logger.debug("Created directory: %s", directory)
 
 
+def find_shader_in_project(shader_name: str, project_dir: Path) -> Path | None:
+    """Search entire project for an existing shader file by name.
+
+    This enables dynamic shader path discovery - if the user has moved shaders
+    to a different location in their Godot project, we'll find and use that
+    path instead of creating duplicates.
+
+    Args:
+        shader_name: Shader filename to search for (e.g., "polygon.gdshader").
+        project_dir: Root directory of the Godot project to search.
+
+    Returns:
+        Path to the found shader file, or None if not found.
+    """
+    for shader_path in project_dir.rglob(shader_name):
+        return shader_path
+    return None
+
+
+def get_shader_paths(
+    project_dir: Path,
+    shaders_src: Path,
+    dry_run: bool = False
+) -> tuple[dict[str, str], int]:
+    """Build map of shader filename to res:// path. Copy missing shaders to shaders/.
+
+    Searches the entire project for existing shader files. If found, uses their
+    current location. If not found, copies from source to project's shaders/
+    directory. This prevents duplicates when users relocate shaders.
+
+    Args:
+        project_dir: Root directory of the Godot project.
+        shaders_src: Source directory containing shader files.
+        dry_run: If True, only log what would be copied.
+
+    Returns:
+        Tuple of (shader_paths, copied_count) where:
+        - shader_paths: Maps shader filename to res:// path
+        - copied_count: Number of shaders copied (or would be copied in dry run)
+    """
+    shader_paths: dict[str, str] = {}
+    shaders_dest = project_dir / "shaders"
+    copied = 0
+
+    for shader_file in SHADER_FILES:
+        # First, search for existing shader anywhere in project
+        found = find_shader_in_project(shader_file, project_dir)
+
+        if found:
+            # Use existing location
+            rel_path = found.relative_to(project_dir)
+            shader_paths[shader_file] = "res://" + str(rel_path).replace("\\", "/")
+            logger.debug("Found existing shader: %s at %s", shader_file, shader_paths[shader_file])
+        else:
+            # Copy to shaders/ and use that path
+            src = shaders_src / shader_file
+            if src.exists():
+                if not dry_run:
+                    shaders_dest.mkdir(parents=True, exist_ok=True)
+                    dest = shaders_dest / shader_file
+                    shutil.copy2(src, dest)
+                    logger.debug("Copied shader: %s", shader_file)
+                else:
+                    logger.debug("[DRY RUN] Would copy shader: %s", shader_file)
+                copied += 1
+            else:
+                logger.warning("Shader file not found in source: %s", src)
+
+            shader_paths[shader_file] = f"res://shaders/{shader_file}"
+
+    logger.debug("Resolved shader paths: %d found, %d copied", len(shader_paths) - copied, copied)
+    return shader_paths, copied
+
+
 def copy_shaders(shaders_dest: Path, dry_run: bool) -> int:
     """Copy .gdshader files from project's shaders/ to destination.
+
+    Note: This function is kept for backwards compatibility. New code should
+    use get_shader_paths() which provides dynamic path discovery.
 
     Args:
         shaders_dest: Destination directory for shader files.
@@ -1147,6 +1224,7 @@ def copy_fbx_files(
 
 def generate_converter_config(
     project_dir: Path,
+    pack_name: str,
     keep_meshes_together: bool,
     mesh_format: str,
     filter_pattern: str | None,
@@ -1161,6 +1239,9 @@ def generate_converter_config(
 
     Args:
         project_dir: Path to the Godot project directory.
+        pack_name: Name of the pack folder to process (e.g., "POLYGON_Nature").
+            When set, godot_converter.gd will only process this pack instead
+            of discovering all pack folders.
         keep_meshes_together: If True, keep all meshes from one FBX together
             in a single scene file.
         mesh_format: Output format - 'tscn' (text) or 'res' (binary).
@@ -1169,6 +1250,7 @@ def generate_converter_config(
         dry_run: If True, only log what would be written.
     """
     config = {
+        "pack_name": pack_name,
         "keep_meshes_together": keep_meshes_together,
         "mesh_format": mesh_format,
         "filter_pattern": filter_pattern,
@@ -1194,6 +1276,7 @@ def run_godot_cli(
     mesh_format: str = "tscn",
     filter_pattern: str | None = None,
     mesh_scale: float = 1.0,
+    pack_name: str = "",
 ) -> tuple[bool, bool, bool]:
     """Run Godot CLI in two phases: import and convert.
 
@@ -1234,6 +1317,8 @@ def run_godot_cli(
             or 'res' (binary compiled resource).
         filter_pattern: Optional filter pattern for FBX filenames. Only FBX
             files containing this pattern (case-insensitive) are processed.
+        pack_name: Name of the pack folder to process. When set, godot_converter.gd
+            will only process this specific pack instead of discovering all packs.
 
     Returns:
         Tuple of (import_success, convert_success, timeout_occurred) where:
@@ -1280,6 +1365,7 @@ def run_godot_cli(
     # Generate converter config JSON for the GDScript to read
     generate_converter_config(
         project_dir,
+        pack_name,
         keep_meshes_together,
         mesh_format,
         filter_pattern,
@@ -2002,6 +2088,15 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
 
             logger.debug("Total prefabs from all MaterialList files: %d", len(prefabs))
 
+        # Determine filtered material names early (before .tres generation)
+        filtered_material_names: set[str] | None = None
+        if config.filter_pattern and prefabs:
+            filtered_material_names = get_filtered_material_names(
+                prefabs, config.filter_pattern, config.source_files
+            )
+            logger.info("Filter limits to %d materials", len(filtered_material_names))
+
+        if material_list_files:
             # Step 5: Build shader cache with LOD inheritance
             logger.info("Step 5: Mapping shader properties...")
             shader_cache, unmatched_materials = build_shader_cache(prefabs)
@@ -2041,20 +2136,36 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
 
         logger.debug("Mapped %d materials, requiring %d textures", len(mapped_materials), len(required_textures))
 
-        # Step 6: Generate .tres files
-        logger.info("Step 6: Generating .tres files...")
+        # Step 6: Resolve shader paths (find existing or copy missing)
+        # This must happen before .tres generation so we can use discovered paths
+        logger.info("Step 6: Resolving shader paths...")
+        script_dir = Path(__file__).parent
+        shaders_src = script_dir / "shaders"
+        shader_paths, stats.shaders_copied = get_shader_paths(
+            project_dir,
+            shaders_src,
+            config.dry_run,
+        )
+
+        # Step 7: Generate .tres files
+        logger.info("Step 7: Generating .tres files...")
         materials_dir = pack_output_dir / "materials"
 
         # Pack-relative texture path (textures are in pack folder, not root)
         texture_base = f"res://{pack_name}/textures"
 
         for mapped_mat in mapped_materials:
+            # Skip materials not used by filtered FBX files
+            if filtered_material_names is not None and mapped_mat.name not in filtered_material_names:
+                continue
+
             try:
-                # Generate .tres content
+                # Generate .tres content with discovered shader paths
                 tres_content = generate_tres(
                     mapped_mat,
-                    shader_base="res://shaders",
-                    texture_base=texture_base
+                    shader_base="res://shaders",  # Fallback if shader not in shader_paths
+                    texture_base=texture_base,
+                    shader_paths=shader_paths
                 )
 
                 # Sanitize filename
@@ -2076,23 +2187,14 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
 
         logger.debug("Generated %d .tres material files", stats.materials_generated)
 
-        # Step 7: Copy .gdshader files
-        logger.info("Step 7: Copying shaders...")
-        stats.shaders_copied = copy_shaders(
-            shaders_dir,
-            config.dry_run,
-        )
-
         # Step 8: Copy required textures
         # Textures primarily come from .unitypackage extraction (texture_guid_to_path)
         # SourceFiles/Textures is used as optional fallback for any missing textures
 
         # Apply smart texture filtering when filter pattern is specified
-        if config.filter_pattern and prefabs:
+        # (filtered_material_names was computed earlier for .tres filtering)
+        if filtered_material_names is not None:
             original_texture_count = len(required_textures)
-            filtered_material_names = get_filtered_material_names(
-                prefabs, config.filter_pattern, config.source_files
-            )
             required_textures = filter_textures_for_materials(
                 required_textures, filtered_material_names, mapped_materials
             )
@@ -2135,72 +2237,63 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
         )
 
         # Step 9: Copy FBX files
+        # Simplified approach: find ALL .fbx files recursively, preserving relative path structure
         if not config.skip_fbx_copy:
-            # Find all FBX directories recursively for complex nested structures
-            # Also check for "Models" directories which some packs use (e.g., Generic folder)
-            fbx_dirs = [config.source_files / "FBX"]
-            if not fbx_dirs[0].exists():
-                # Search for both FBX and Models directories
-                fbx_dirs = [d for d in config.source_files.rglob("FBX") if d.is_dir()]
-                models_dirs = [d for d in config.source_files.rglob("Models") if d.is_dir()]
-                fbx_dirs.extend(models_dirs)
-                if fbx_dirs:
-                    logger.debug("Found %d FBX/Models directories in nested structure", len(fbx_dirs))
-                    for fd in fbx_dirs:
-                        logger.debug("  FBX/Models dir: %s", fd)
-            source_fbx = fbx_dirs[0] if fbx_dirs else config.source_files / "FBX"
-            additional_fbx_dirs = fbx_dirs[1:] if len(fbx_dirs) > 1 else None
-            output_models = pack_output_dir / "models"
+            # Find all FBX files recursively from source root
+            # Note: On Windows, rglob is case-insensitive so *.fbx matches *.FBX
+            fbx_files = list(config.source_files.rglob("*.fbx"))
+            total_count = len(fbx_files)
 
-            # Count FBX files before copying for step message
-            # Note: Only use *.fbx pattern - on Windows, rglob is case-insensitive
-            # so *.fbx already matches *.FBX, and adding both would double-count
-            all_fbx_dirs = [source_fbx]
-            if additional_fbx_dirs:
-                all_fbx_dirs.extend(additional_fbx_dirs)
-            all_fbx_files: list[Path] = []
-            for fbx_dir in all_fbx_dirs:
-                if fbx_dir.exists():
-                    all_fbx_files.extend(fbx_dir.rglob("*.fbx"))
-            total_count = len(all_fbx_files)
-
-            # Apply filter to get accurate count
             if config.filter_pattern:
+                # Apply filter to FBX filenames
                 pattern_lower = config.filter_pattern.lower()
-                filtered_files = [f for f in all_fbx_files if pattern_lower in f.stem.lower()]
-                filtered_count = len(filtered_files)
+                fbx_files = [f for f in fbx_files if pattern_lower in f.stem.lower()]
                 logger.info(
                     "Step 9: Copying %d of %d FBX files (filter: %s)...",
-                    filtered_count, total_count, config.filter_pattern
+                    len(fbx_files), total_count, config.filter_pattern
                 )
             else:
-                logger.info("Step 9: Copying %d FBX files...", total_count)
+                logger.info("Step 9: Copying %d FBX files...", len(fbx_files))
 
-            stats.fbx_copied, stats.fbx_skipped = copy_fbx_files(
-                source_fbx,
-                output_models,
-                config.dry_run,
-                config.filter_pattern,
-                additional_fbx_dirs=additional_fbx_dirs,
-            )
+            models_dir = pack_output_dir / "models"
 
-            if stats.fbx_copied == 0 and stats.fbx_skipped == 0:
-                dirs_str = ", ".join(str(d) for d in fbx_dirs) if fbx_dirs else str(source_fbx)
-                warning_msg = f"No FBX files found in {dirs_str}"
+            for fbx_path in fbx_files:
+                # Preserve relative path structure from source
+                rel_path = fbx_path.relative_to(config.source_files)
+                dest_path = models_dir / rel_path
+
+                # Skip if destination already exists and is same size
+                if dest_path.exists():
+                    if dest_path.stat().st_size == fbx_path.stat().st_size:
+                        logger.debug("Skipping existing FBX: %s", rel_path)
+                        stats.fbx_skipped += 1
+                        continue
+
+                if config.dry_run:
+                    logger.debug("[DRY RUN] Would copy FBX: %s", rel_path)
+                else:
+                    dest_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(fbx_path, dest_path)
+                    logger.debug("Copied FBX: %s", rel_path)
+
+                stats.fbx_copied += 1
+
+            if stats.fbx_copied == 0 and stats.fbx_skipped == 0 and total_count == 0:
+                warning_msg = f"No FBX files found in {config.source_files}"
                 stats.warnings.append(warning_msg)
         else:
             logger.info("Step 9: Skipping FBX copy...")
 
         # Step 10: Generate mesh_material_mapping.json (uses prefabs parsed in Step 4.5)
-        # Note: mapping goes to shaders_dir to be shared across packs
+        # Note: mapping goes to pack_output_dir so each pack has its own mapping
         logger.info("Step 10: Generating mesh material mapping...")
         if prefabs:
-            mapping_output = shaders_dir / "mesh_material_mapping.json"
+            mapping_output = pack_output_dir / "mesh_material_mapping.json"
             if config.dry_run:
                 logger.debug("[DRY RUN] Would write mesh_material_mapping.json")
             else:
                 generate_mesh_material_mapping_json(prefabs, mapping_output)
-                logger.debug("Generated mesh_material_mapping.json")
+                logger.debug("Generated mesh_material_mapping.json to pack folder")
 
             # Check for missing material references (no placeholders - just warn)
             if not config.dry_run:
@@ -2256,6 +2349,7 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
                 mesh_format=config.mesh_format,
                 filter_pattern=config.filter_pattern,
                 mesh_scale=config.mesh_scale,
+                pack_name=pack_name,
             )
 
             # Count generated mesh files

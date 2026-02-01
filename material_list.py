@@ -361,9 +361,13 @@ def generate_mesh_material_mapping_json(
     This file is consumed by the GDScript converter (godot_converter.gd)
     to apply the correct materials to each mesh surface.
 
+    Each pack has its own mapping file in the pack output directory,
+    so no merging is needed.
+
     Args:
         prefabs: List of PrefabMaterials from parse_material_list().
-        output_path: Path where the JSON file will be written.
+        output_path: Path where the JSON file will be written (typically
+            {pack_output_dir}/mesh_material_mapping.json).
         indent: JSON indentation level (default 2 spaces).
 
     Raises:
@@ -371,7 +375,7 @@ def generate_mesh_material_mapping_json(
 
     Example:
         >>> prefabs = parse_material_list(Path("MaterialList.txt"))
-        >>> generate_mesh_material_mapping_json(prefabs, Path("mesh_material_mapping.json"))
+        >>> generate_mesh_material_mapping_json(prefabs, Path("POLYGON_Nature/mesh_material_mapping.json"))
 
     Output JSON format:
         {
@@ -384,18 +388,6 @@ def generate_mesh_material_mapping_json(
 
     # Ensure parent directory exists
     output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Merge with existing mapping if file exists (supports multi-pack workflows)
-    if output_path.exists():
-        try:
-            with output_path.open("r", encoding="utf-8") as f:
-                existing_map = json.load(f)
-            # Merge: new pack entries take precedence for duplicates
-            existing_map.update(mesh_map)
-            mesh_map = existing_map
-            logger.debug(f"Merged with existing mapping: {len(existing_map)} total meshes")
-        except (json.JSONDecodeError, OSError) as e:
-            logger.warning(f"Could not read existing mapping, overwriting: {e}")
 
     with output_path.open("w", encoding="utf-8") as f:
         json.dump(mesh_map, f, indent=indent, ensure_ascii=False)

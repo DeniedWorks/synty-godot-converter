@@ -437,7 +437,8 @@ def _build_shader_parameters(
 def generate_tres(
     material: "MappedMaterial",
     shader_base: str = "res://shaders",
-    texture_base: str = "res://textures"
+    texture_base: str = "res://textures",
+    shader_paths: dict[str, str] | None = None
 ) -> str:
     """Generate Godot .tres ShaderMaterial resource content.
 
@@ -452,7 +453,13 @@ def generate_tres(
     Args:
         material: MappedMaterial with shader and property data.
         shader_base: Base path for shader references (default: "res://shaders").
+            Used as fallback when shader_paths is not provided or doesn't contain
+            the shader file.
         texture_base: Base path for texture references (default: "res://textures").
+        shader_paths: Optional mapping of shader filename to full res:// path.
+            When provided, uses the discovered path instead of shader_base.
+            This enables dynamic shader path discovery - if the user has moved
+            shaders to a different location, the converter will use that path.
 
     Returns:
         Complete .tres file content as string.
@@ -479,8 +486,11 @@ def generate_tres(
         shader_parameter/alpha_clip_threshold = 0.5
         shader_parameter/leaf_base_color = Color(1.0, 0.9, 0.8, 1.0)
     """
-    # Build shader path
-    shader_path = f"{shader_base}/{material.shader_file}"
+    # Build shader path - use discovered path if available, else fall back to base
+    if shader_paths and material.shader_file in shader_paths:
+        shader_path = shader_paths[material.shader_file]
+    else:
+        shader_path = f"{shader_base}/{material.shader_file}"
 
     # Build external resources
     ext_resources, texture_id_map = _build_ext_resources(
@@ -565,7 +575,8 @@ def generate_and_write_tres(
     material: "MappedMaterial",
     output_dir: Path,
     shader_base: str = "res://shaders",
-    texture_base: str = "res://textures"
+    texture_base: str = "res://textures",
+    shader_paths: dict[str, str] | None = None
 ) -> Path:
     """
     Generate and write a .tres file for a material.
@@ -578,6 +589,8 @@ def generate_and_write_tres(
         output_dir: Directory to write the .tres file to.
         shader_base: Resource path base for shaders.
         texture_base: Resource path base for textures.
+        shader_paths: Optional mapping of shader filename to full res:// path.
+            When provided, uses the discovered path instead of shader_base.
 
     Returns:
         Path to the written .tres file.
@@ -597,7 +610,7 @@ def generate_and_write_tres(
         output/materials/Crystal_Mat_01.tres
     """
     # Generate content
-    content = generate_tres(material, shader_base, texture_base)
+    content = generate_tres(material, shader_base, texture_base, shader_paths)
 
     # Build output path
     safe_name = sanitize_filename(material.name)
