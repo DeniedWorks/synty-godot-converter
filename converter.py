@@ -1712,7 +1712,7 @@ def get_filtered_material_names(
 
     for prefab in prefabs:
         # Check if prefab name matches filter
-        if pattern_lower in prefab.name.lower():
+        if pattern_lower in prefab.prefab_name.lower():
             for mesh in prefab.meshes:
                 for slot in mesh.slots:
                     if slot.material_name:

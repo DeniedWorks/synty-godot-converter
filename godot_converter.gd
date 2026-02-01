@@ -487,7 +487,7 @@ func save_fbx_as_single_scene(scene_root: Node, mesh_instances: Array[MeshInstan
 				for bs_idx in range(original_mesh.get_blend_shape_count()):
 					blend_shapes.append(original_mesh.surface_get_blend_shape_arrays(surf_idx)[bs_idx])
 
-				var primitive_type := original_mesh.surface_get_primitive_type(surf_idx)
+				var primitive_type: Mesh.PrimitiveType = original_mesh.surface_get_primitive_type(surf_idx)
 				combined_mesh.add_surface_from_arrays(primitive_type, arrays, blend_shapes)
 
 				# Get material (either override or from mesh)
