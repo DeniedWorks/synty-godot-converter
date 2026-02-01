@@ -2257,24 +2257,39 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
 
             models_dir = pack_output_dir / "models"
 
+            # Common prefixes to strip from FBX paths (case-insensitive)
+            common_prefixes = {"sourcefiles", "source files", "fbx", "models"}
+
             for fbx_path in fbx_files:
-                # Preserve relative path structure from source
+                # Get relative path from source and strip common prefixes
                 rel_path = fbx_path.relative_to(config.source_files)
-                dest_path = models_dir / rel_path
+                path_parts = list(rel_path.parts)
+
+                # Strip leading parts that match common prefixes
+                while path_parts and path_parts[0].lower() in common_prefixes:
+                    path_parts.pop(0)
+
+                # Reconstruct path from remaining parts (or use filename if all stripped)
+                if path_parts:
+                    clean_rel_path = Path(*path_parts)
+                else:
+                    clean_rel_path = Path(rel_path.name)
+
+                dest_path = models_dir / clean_rel_path
 
                 # Skip if destination already exists and is same size
                 if dest_path.exists():
                     if dest_path.stat().st_size == fbx_path.stat().st_size:
-                        logger.debug("Skipping existing FBX: %s", rel_path)
+                        logger.debug("Skipping existing FBX: %s", clean_rel_path)
                         stats.fbx_skipped += 1
                         continue
 
                 if config.dry_run:
-                    logger.debug("[DRY RUN] Would copy FBX: %s", rel_path)
+                    logger.debug("[DRY RUN] Would copy FBX: %s", clean_rel_path)
                 else:
                     dest_path.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(fbx_path, dest_path)
-                    logger.debug("Copied FBX: %s", rel_path)
+                    logger.debug("Copied FBX: %s", clean_rel_path)
 
                 stats.fbx_copied += 1
 
