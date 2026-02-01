@@ -159,12 +159,12 @@ python gui.py
 - **Progress indication** with status updates
 - **Help popup** with documentation
 
-### Path Defaults
+### Settings Persistence
 
-The GUI comes with sensible Windows defaults:
-- **Synty Assets:** `C:\SyntyComplete`
-- **Godot:** `C:\Godot\Godot_v4.6-stable_mono_win64\Godot_v4.6-stable_mono_win64.exe`
-- **Output:** `C:\Godot\Projects\converted-assets`
+The GUI automatically saves your settings to `%APPDATA%\SyntyConverter\settings.json`:
+- All path fields (Unity package, source files, output, Godot executable)
+- All options (output format, mesh mode, filter, timeout, checkboxes)
+- Settings are restored when you reopen the application
 
 For detailed GUI documentation, see [GUI Application](steps/gui.md).
 
@@ -193,8 +193,9 @@ For detailed GUI documentation, see [GUI Application](steps/gui.md).
 | `--godot-timeout` | 600 | Maximum seconds for Godot CLI operations. Increase for very large packs. |
 | `--keep-meshes-together` | Off | Keep all meshes from one FBX together in a single scene file. Default behavior is to save each mesh as a separate file. |
 | `--mesh-format` | `tscn` | Output format for mesh scenes: `tscn` (text, human-readable) or `res` (binary, more compact). |
-| `--filter` | None | Filter pattern for FBX filenames (case-insensitive). Only FBX files containing the pattern are processed. Also filters textures to only copy those needed by filtered FBX files. Example: `--filter Tree` |
-| `--high-quality-textures` | Off | Use BPTC compression for higher quality textures. Produces larger files but better visual quality. |
+| `--filter` | None | Filter pattern for FBX filenames (case-insensitive). Only FBX files containing the pattern are processed. Also filters textures AND materials to only include those needed by filtered FBX files. Example: `--filter Tree` |
+| `--high-quality-textures` | Off | Use BPTC compression for higher quality textures. Produces larger files but better visual quality. Default uses lossless compression for faster Godot import times. |
+| `--mesh-scale` | 1.0 | Scale factor for mesh vertices. Use when packs are undersized (e.g., `--mesh-scale 100` for packs that are 100x too small). |
 
 ---
 
@@ -205,7 +206,9 @@ After conversion, your output directory contains:
 ```
 output/
   project.godot              # Godot project file with global shader uniforms
-  shaders/                   # Community drop-in shaders (7 files)
+  conversion_log.txt         # Warnings, errors, statistics (appends for multi-pack)
+  converter_config.json      # Runtime config for Godot converter (intermediate file)
+  shaders/                   # Community drop-in shaders (7 files, shared across packs)
     polygon.gdshader         # Static props, buildings, terrain
     foliage.gdshader         # Trees, ferns, grass, vegetation
     crystal.gdshader         # Crystals, gems, glass, ice
@@ -213,31 +216,27 @@ output/
     clouds.gdshader          # Volumetric clouds, sky effects
     particles.gdshader       # Particles, fog, distant effects
     skydome.gdshader         # Gradient sky domes
-  textures/                  # Textures referenced by materials
-    PolygonFantasy_Texture_01.png
-    PolygonFantasy_Texture_02.png
-    ...
-  materials/                 # Generated ShaderMaterial .tres files
-    PolygonFantasy_Mat_01_A.tres
-    Crystal_Mat_01.tres
-    Water_River_Mat.tres
-    ...
-  models/                    # Copied FBX files (preserves subdirectory structure)
-    Characters/
-    Environment/
-    Props/
-    ...
-  meshes/                    # Converted mesh .tscn files (ready to use!)
-    Characters/
-      SM_Chr_Knight_01.tscn
-    Environment/
-      SM_Env_Tree_Pine_01_LOD0.tscn
-      SM_Env_Tree_Pine_01_LOD1.tscn
-    ...
-  shaders/
-    mesh_material_mapping.json  # Mesh-to-material assignments (intermediate file)
-  converter_config.json      # Runtime config for Godot converter (intermediate file)
-  conversion_log.txt         # Warnings, errors, statistics
+  POLYGON_PackName/          # Each pack gets its own folder
+    textures/                # Textures referenced by this pack's materials
+      PolygonFantasy_Texture_01.png
+      ...
+    materials/               # Generated ShaderMaterial .tres files
+      PolygonFantasy_Mat_01_A.tres
+      Crystal_Mat_01.tres
+      ...
+    models/                  # Copied FBX files (preserves subdirectory structure)
+      Characters/
+      Environment/
+      Props/
+      ...
+    meshes/                  # Converted mesh .tscn files (ready to use!)
+      Characters/
+        SM_Chr_Knight_01.tscn
+      Environment/
+        SM_Env_Tree_Pine_01_LOD0.tscn
+        SM_Env_Tree_Pine_01_LOD1.tscn
+      ...
+    mesh_material_mapping.json  # Mesh-to-material assignments (per-pack)
 ```
 
 ### Understanding the Output
@@ -248,7 +247,9 @@ output/
 
 **models/** - Raw FBX files. These are used by Godot during import but aren't needed at runtime.
 
-**shaders/** - Contains the drop-in replacement shaders and the intermediate `mesh_material_mapping.json` file.
+**shaders/** - Contains the drop-in replacement shaders. Shaders are only copied if they don't already exist elsewhere in the project, preventing duplicates when converting multiple packs.
+
+**mesh_material_mapping.json** - Each pack has its own mapping file in its folder. This enables incremental multi-pack workflows where converting Pack B doesn't re-process Pack A.
 
 ---
 
@@ -365,9 +366,9 @@ The filter is case-insensitive and matches anywhere in the FBX filename. This is
 - Converting only specific categories (trees, props, characters)
 - Faster iteration when debugging specific assets
 
-**Smart Texture Filtering**: When using `--filter`, the converter automatically identifies which textures are needed by the filtered FBX files and only copies those textures. This dramatically reduces output size when converting a subset of assets.
+**Smart Filtering**: When using `--filter`, the converter automatically identifies which materials AND textures are needed by the filtered FBX files and only processes those. This dramatically reduces output size and conversion time when converting a subset of assets.
 
-Example: Using `--filter Chest` on POLYGON Samurai Empire reduces textures from 234 to just 8 files (97% reduction).
+Example: Using `--filter Chest` on POLYGON Samurai Empire reduces textures from 234 to just 8 files (97% reduction), and similarly reduces the number of generated material files.
 
 ### High Quality Textures
 
@@ -380,7 +381,65 @@ python converter.py ... --high-quality-textures
 This option enables BPTC (BC7) texture compression in Godot's import settings:
 - Higher visual quality, especially for gradients and transparency
 - Larger compressed texture files
+- Slower Godot import times
 - Recommended for hero assets or when visual fidelity is critical
+
+The default uses lossless compression (mode=0) for faster Godot import times.
+
+### Mesh Scale
+
+**Scale undersized meshes** when packs import at incorrect sizes:
+
+```bash
+python converter.py ... --mesh-scale 100
+```
+
+Some Synty packs may import at 1/100th scale. Use this option to fix the scale during conversion rather than manually rescaling in Godot. The scale factor is applied to all mesh vertices during the Godot conversion step.
+
+---
+
+## Multi-Pack Workflow
+
+The converter is designed for incremental multi-pack workflows:
+
+### Per-Pack Isolation
+
+Each pack is converted to its own subfolder:
+```
+output/
+  POLYGON_Fantasy/
+    textures/
+    materials/
+    models/
+    meshes/
+    mesh_material_mapping.json
+  POLYGON_Nature/
+    textures/
+    materials/
+    models/
+    meshes/
+    mesh_material_mapping.json
+  shaders/                    # Shared across all packs
+  project.godot
+  conversion_log.txt          # Appends entries for each pack
+```
+
+### Smart Shader Discovery
+
+When converting a second pack to the same project:
+1. The converter searches the entire project for existing shaders
+2. If shaders are found (even if moved to a different location), those paths are used
+3. New shaders are only copied if they don't exist anywhere in the project
+
+This prevents duplicate shader files when converting multiple packs.
+
+### Incremental Conversion
+
+Converting Pack B after Pack A:
+- Pack A's files are untouched
+- Only Pack B's folder is created/updated
+- The Godot converter script only processes Pack B (via `pack_name` in converter_config.json)
+- `conversion_log.txt` appends Pack B's summary
 
 ---
 
@@ -564,16 +623,16 @@ Use Godot's LOD system or manually switch based on distance.
 
 ### Reading the Conversion Log
 
-After each conversion, check `conversion_log.txt`:
+After each conversion, check `conversion_log.txt` in the project root. The log appends entries for each pack conversion:
 
 ```
-============================================================
-Synty Shader Converter - Conversion Log
-============================================================
-Date: 2024-01-15T10:30:00
+================================================================================
+Conversion: POLYGON_Fantasy
+Date: 2024-01-15 10:30:00
+================================================================================
 Unity Package: C:\Synty\Fantasy\Fantasy.unitypackage
 Source Files: C:\Synty\Fantasy\SourceFiles
-Output Directory: C:\Godot\Projects\Fantasy
+Output Directory: C:\Godot\Projects\Assets
 
 Statistics:
   Materials Parsed: 145
@@ -588,7 +647,13 @@ Warnings (2):
   - Texture not found: PolygonFantasy_Texture_Special
   - Failed to parse material GUID abc123: Invalid YAML
 
-============================================================
+================================================================================
+
+================================================================================
+Conversion: POLYGON_Nature
+Date: 2024-01-15 10:45:00
+================================================================================
+...
 ```
 
 ### Getting Help

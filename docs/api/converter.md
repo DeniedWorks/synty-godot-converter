@@ -253,6 +253,137 @@ def parse_args() -> ConversionConfig
 | `--godot-timeout` | No | Timeout for Godot CLI (default: 600s) |
 | `--filter` | No | Filter pattern for FBX filenames (also filters textures) |
 | `--high-quality-textures` | No | Use BPTC compression for higher quality textures |
+| `--mesh-scale` | No | Scale factor for mesh import (default: 1.0) |
+
+---
+
+### find_shader_in_project
+
+Search for a shader file within a Godot project directory.
+
+```python
+def find_shader_in_project(shader_name: str, project_dir: Path) -> Path | None
+```
+
+#### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `shader_name` | `str` | Name of the shader file to find (e.g., `"polygon.gdshader"`) |
+| `project_dir` | `Path` | Root directory of the Godot project to search |
+
+#### Returns
+
+`Path` to the shader file if found, `None` otherwise.
+
+#### Behavior
+
+- Recursively searches the project directory for the shader file
+- Case-insensitive matching on Windows
+- Returns the first match found
+
+---
+
+### get_shader_paths
+
+Build a mapping of shader names to their paths, preferring project shaders over bundled ones.
+
+```python
+def get_shader_paths(
+    project_dir: Path,
+    shaders_src: Path,
+    dry_run: bool
+) -> dict[str, Path]
+```
+
+#### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `project_dir` | `Path` | Root directory of the Godot project |
+| `shaders_src` | `Path` | Path to the converter's bundled shaders directory |
+| `dry_run` | `bool` | If `True`, only log what would be done |
+
+#### Returns
+
+`dict[str, Path]` mapping shader names to their absolute paths.
+
+#### Behavior
+
+1. For each shader in `SHADER_FILES`, first searches the project directory
+2. If found in project, uses that path (enables custom shader overrides)
+3. If not found in project, uses the bundled shader from `shaders_src`
+4. Logs which shaders are project-local vs bundled
+
+---
+
+### generate_converter_config
+
+Generate the `converter_config.json` file for the GDScript converter.
+
+```python
+def generate_converter_config(
+    output_dir: Path,
+    pack_name: str,
+    keep_meshes_together: bool = False,
+    mesh_format: str = "tscn",
+    filter_pattern: str | None = None,
+    dry_run: bool = False
+) -> None
+```
+
+#### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `output_dir` | `Path` | required | Output directory for the config file |
+| `pack_name` | `str` | required | Name of the asset pack being converted |
+| `keep_meshes_together` | `bool` | `False` | Keep all meshes from one FBX in a single scene |
+| `mesh_format` | `str` | `"tscn"` | Output format: `"tscn"` or `"res"` |
+| `filter_pattern` | `str \| None` | `None` | Filter pattern for FBX filenames |
+| `dry_run` | `bool` | `False` | If `True`, only log what would be written |
+
+#### Generated Config
+
+```json
+{
+  "pack_name": "PolygonNature_SourceFiles",
+  "keep_meshes_together": false,
+  "mesh_format": "tscn",
+  "filter_pattern": null
+}
+```
+
+---
+
+### write_conversion_log
+
+Write or append conversion results to a log file.
+
+```python
+def write_conversion_log(
+    project_dir: Path,
+    pack_name: str,
+    stats: ConversionStats,
+    dry_run: bool = False
+) -> None
+```
+
+#### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `project_dir` | `Path` | required | Root directory of the Godot project |
+| `pack_name` | `str` | required | Name of the asset pack that was converted |
+| `stats` | `ConversionStats` | required | Conversion statistics to log |
+| `dry_run` | `bool` | `False` | If `True`, only log what would be written |
+
+#### Behavior
+
+- Writes to `{project_dir}/conversion_log.txt`
+- Opens in append mode to preserve logs from previous conversions
+- Includes timestamp, pack name, and full statistics summary
+- Records any warnings or errors encountered
 
 ---
 

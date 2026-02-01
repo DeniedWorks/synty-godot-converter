@@ -39,12 +39,13 @@ This approach has several advantages:
 
 | Artifact | Purpose |
 |----------|---------|
-| `.tres` files | Godot ShaderMaterial definitions |
-| `.gdshader` files | 7 drop-in replacement shaders |
-| `.tscn` files | Individual mesh scene files |
+| `.tres` files | Godot ShaderMaterial definitions (per-pack in `PACK_NAME/materials/`) |
+| `.gdshader` files | 7 drop-in replacement shaders (shared in `shaders/`) |
+| `.tscn` files | Individual mesh scene files (per-pack in `PACK_NAME/meshes/`) |
 | `project.godot` | Godot project with global shader uniforms |
-| `shaders/mesh_material_mapping.json` | Mesh-to-material mapping for Godot CLI |
-| `converter_config.json` | Runtime configuration for the GDScript converter |
+| `PACK_NAME/mesh_material_mapping.json` | Mesh-to-material mapping for Godot CLI (per-pack) |
+| `converter_config.json` | Runtime configuration for the GDScript converter (includes pack_name, mesh_scale) |
+| `conversion_log.txt` | Conversion summaries (appends for each pack) |
 
 ---
 
@@ -67,7 +68,8 @@ converter.py ──┬── unity_package.py
                       └── (json - stdlib)
 
 gui.py ────────┬── converter.py (ConversionConfig, run_conversion)
-               └── customtkinter (external dependency)
+               ├── customtkinter (external dependency)
+               └── settings.json (persisted to %APPDATA%\SyntyConverter\)
 
 godot_converter.gd ── (runs inside Godot headless)
                └── reads converter_config.json, mesh_material_mapping.json
@@ -240,9 +242,21 @@ shader_cache = {
 
 This prevents jarring visual discontinuities when meshes transition between LOD levels at different distances from the camera.
 
-### Step 6: Generate .tres Files
+### Step 6: Resolve Shader Paths
 
-For each `MappedMaterial`, generate a Godot ShaderMaterial resource:
+Before generating materials, the converter searches the entire project for existing shader files:
+
+1. **Search**: Look for each shader file (e.g., `polygon.gdshader`) anywhere in the project
+2. **Reuse**: If found, use that path (e.g., `res://my_custom_location/polygon.gdshader`)
+3. **Copy**: If not found, copy to `shaders/` and use `res://shaders/polygon.gdshader`
+
+This prevents duplicate shaders when converting multiple packs or when users relocate shaders.
+
+### Step 7: Generate .tres Files
+
+For each `MappedMaterial`, generate a Godot ShaderMaterial resource.
+
+**Smart Material Filtering**: When using `--filter`, materials are only generated if they are used by matching FBX files. This is determined by cross-referencing MaterialList.txt with the filter pattern.
 
 ```ini
 [gd_resource type="ShaderMaterial" load_steps=3 format=3]
@@ -257,28 +271,19 @@ shader_parameter/leaf_smoothness = 0.1
 shader_parameter/enable_breeze = true
 ```
 
-### Step 7: Copy Shaders
-
-Copy 7 `.gdshader` files from `shaders/` to output:
-
-- `polygon.gdshader` - Static props, buildings, terrain
-- `foliage.gdshader` - Trees, ferns, grass, vegetation
-- `crystal.gdshader` - Crystals, gems, glass, ice
-- `water.gdshader` - Rivers, lakes, oceans
-- `clouds.gdshader` - Volumetric clouds
-- `particles.gdshader` - Soft particles, fog effects
-- `skydome.gdshader` - Simple gradient sky
-
 ### Step 8: Copy Textures
 
 Copy only textures that are actually referenced by generated materials:
 
 1. Build set of required texture names from all materials
-2. **Smart filtering**: When using `--filter`, only include textures needed by filtered FBX files (can reduce texture count by 90%+)
-3. Search `SourceFiles/Textures` for matching files
-4. Copy to `output/textures/`
-5. Generate `.import` files with VRAM compression (or BPTC when `--high-quality-textures` is used)
-6. Log warnings for missing textures
+2. **Smart filtering**: When using `--filter`, cross-reference with filtered materials to only include textures needed by matching FBX files (can reduce texture count by 90%+)
+3. Search `.unitypackage` extracted textures first (primary source)
+4. Search `SourceFiles/Textures` as fallback
+5. Copy to `output/PACK_NAME/textures/`
+6. Generate `.import` files with compression settings:
+   - **Default**: Lossless compression (mode=0) for faster Godot import times
+   - **High quality**: BPTC compression (mode=2) when `--high-quality-textures` is used
+7. Log warnings for missing textures
 
 ### Step 9: Copy FBX Files
 
@@ -292,7 +297,7 @@ Copy FBX models from `SourceFiles/FBX` to `output/models/`:
 
 **Note:** MaterialList.txt parsing now happens in Step 4.5 to enable shader cache building for LOD inheritance. Step 10 generates the JSON file from the cached prefab data.
 
-Generates `shaders/mesh_material_mapping.json` for the Godot CLI converter:
+Generates `PACK_NAME/mesh_material_mapping.json` for the Godot CLI converter:
 
 ```json
 {
@@ -300,6 +305,8 @@ Generates `shaders/mesh_material_mapping.json` for the Godot CLI converter:
   "SM_Env_Tree_01_LOD0": ["Tree_Trunk_Mat", "Tree_Leaves_Mat"]
 }
 ```
+
+**Per-pack mapping**: Each pack has its own mapping file in its folder. This enables incremental multi-pack workflows where converting Pack B doesn't need to re-read Pack A's mapping.
 
 Also checks for materials referenced by meshes but not generated (adds to warnings).
 
@@ -334,15 +341,80 @@ godot --headless --import --path <project_dir>
 ```bash
 godot --headless --script res://godot_converter.gd --path <project_dir>
 ```
-- Reads `converter_config.json` for runtime options (mesh format, filter pattern, etc.)
-- Reads `shaders/mesh_material_mapping.json` for material assignments
-- Auto-discovers pack folders (directories with models/ and materials/ subdirs)
+- Reads `converter_config.json` for runtime options:
+  - `pack_name`: Specific pack folder to process (enables incremental conversion)
+  - `mesh_format`: Output format (tscn or res)
+  - `filter_pattern`: FBX filename filter
+  - `mesh_scale`: Scale factor for mesh vertices (e.g., 100 for undersized packs)
+  - `keep_meshes_together`: Whether to combine meshes per FBX
+- Reads `PACK_NAME/mesh_material_mapping.json` for material assignments
 - Loads each FBX as PackedScene, finds all MeshInstance3D nodes
+- Applies mesh_scale to vertex positions if not 1.0
 - Applies materials as surface overrides with fallback logic
 - Handles collision meshes with green wireframe debug material
 - Saves as individual `.tscn` files or combined scenes (configurable)
 
 See [Step 12: Godot Conversion](steps/12-godot-conversion.md) for detailed implementation.
+
+---
+
+## Multi-Pack Architecture
+
+The converter supports incremental multi-pack conversion to a single Godot project.
+
+### Pack Isolation
+
+Each pack is converted to its own subfolder:
+```
+project/
+  POLYGON_Fantasy/
+    textures/
+    materials/
+    meshes/
+    models/
+    mesh_material_mapping.json
+  POLYGON_Nature/
+    textures/
+    materials/
+    meshes/
+    models/
+    mesh_material_mapping.json
+  shaders/                    # Shared across all packs
+  project.godot
+  conversion_log.txt          # Appends for each conversion
+```
+
+### Smart Shader Discovery
+
+The `get_shader_paths()` function implements dynamic shader discovery:
+
+1. **Search**: For each required shader, search the entire project tree
+2. **Reuse**: If found (even if relocated by user), use that path in material references
+3. **Copy**: If not found, copy to `shaders/` directory
+
+This prevents shader duplication when:
+- Converting a second pack to the same project
+- Users have moved shaders to custom locations
+
+### Incremental Processing
+
+The `converter_config.json` includes a `pack_name` field:
+
+```json
+{
+  "pack_name": "POLYGON_Nature",
+  "keep_meshes_together": false,
+  "mesh_format": "tscn",
+  "filter_pattern": null,
+  "mesh_scale": 1.0
+}
+```
+
+When `pack_name` is set, `godot_converter.gd` only processes that specific pack folder, leaving other packs untouched.
+
+### Append-Mode Logging
+
+`write_conversion_log()` appends to `conversion_log.txt` rather than overwriting, accumulating summaries across multiple pack conversions with timestamps for each entry.
 
 ---
 
@@ -542,15 +614,18 @@ For detailed implementation documentation of each pipeline step, see the step do
 | Step 2 | [Create Directories](steps/02-create-directories.md) | `converter.py` |
 | Step 3 | [Extract Unity Package](steps/03-extract-unity-package.md) | `unity_package.py` |
 | Step 4 | [Parse Materials](steps/04-parse-materials.md) | `unity_parser.py` |
-| Step 5 | [Parse MaterialList](steps/05-parse-material-list.md) | `material_list.py` |
-| Step 6 | [Shader Detection](steps/06-shader-detection.md) | `shader_mapping.py` |
+| Step 4.5 | [Parse MaterialList](steps/05-parse-material-list.md) | `material_list.py` |
+| Step 5 | [Shader Detection](steps/06-shader-detection.md) | `shader_mapping.py` |
+| Step 6 | Resolve Shader Paths | `converter.py` |
 | Step 7 | [TRES Generation](steps/07-tres-generation.md) | `tres_generator.py` |
-| Step 8 | [Copy Shaders](steps/08-copy-shaders.md) | `converter.py` |
-| Step 9 | [Copy Textures](steps/09-copy-textures.md) | `converter.py` |
-| Step 10 | [Copy FBX](steps/10-copy-fbx.md) | `converter.py` |
-| Step 11 | [Generate Mapping](steps/11-generate-mapping.md) | `converter.py` |
+| Step 8 | [Copy Textures](steps/09-copy-textures.md) | `converter.py` |
+| Step 9 | [Copy FBX](steps/10-copy-fbx.md) | `converter.py` |
+| Step 10 | [Generate Mapping](steps/11-generate-mapping.md) | `converter.py` |
+| Step 11 | Generate project.godot | `converter.py` |
 | Step 12 | [Godot Conversion](steps/12-godot-conversion.md) | `godot_converter.gd` |
 | GUI | [GUI Application](steps/gui.md) | `gui.py` |
+
+**Note:** Step numbering changed in v2.1 - shader copying is now part of Step 6 (Resolve Shader Paths).
 
 ---
 

@@ -598,21 +598,22 @@ logger.info("Step 8: Copying %d textures...", len(required_textures))
 
 This can dramatically reduce the output size. A pack with 500+ textures might only need 50-100 for the specific materials being used.
 
-### 1a. Smart Texture Filtering
+### 1a. Smart Texture and Material Filtering
 
-When using the `--filter` option to convert only specific FBX files, the converter also intelligently filters textures. Instead of copying all textures referenced by all materials in the pack, it only copies textures that are actually used by the filtered FBX files.
+When using the `--filter` option to convert only specific FBX files, the converter intelligently filters both textures AND materials. Instead of copying all assets referenced by all materials in the pack, it only copies assets that are actually used by the filtered FBX files.
 
 This is accomplished by:
 1. Parsing `MaterialList.txt` to identify which materials each FBX file uses
 2. Filtering the material list to only include materials used by filtered FBX files
 3. Building the required texture set from this filtered material list
+4. Only generating material `.tres` files for the filtered materials
 
 **Example**: Using `--filter Chest` on POLYGON Samurai Empire:
-- Full pack: 234 textures
-- With filter: 8 textures
+- Full pack: 234 textures, 150 materials
+- With filter: 8 textures, 4 materials
 - Reduction: 97%
 
-This makes it practical to extract small subsets of assets from large packs without including unnecessary textures.
+This makes it practical to extract small subsets of assets from large packs without including unnecessary textures or materials.
 
 ### 2. Prefer Package Textures
 
@@ -961,4 +962,4 @@ Add to the following docs:
 
 ---
 
-*Last Updated: 2026-01-31*
+*Last Updated: 2026-02-01*

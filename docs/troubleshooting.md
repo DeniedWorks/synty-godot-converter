@@ -11,6 +11,8 @@ Common issues and solutions when using the Synty Unity-to-Godot Converter.
 
 - [Installation Issues](#installation-issues)
 - [Conversion Errors](#conversion-errors)
+- [Multi-Pack Workflow Issues](#multi-pack-workflow-issues)
+- [Shader and File Location Issues](#shader-and-file-location-issues)
 - [Material Issues](#material-issues)
 - [Godot Import Issues](#godot-import-issues)
 - [Visual Issues](#visual-issues)
@@ -159,7 +161,139 @@ dir "C:\SyntyComplete\POLYGON_EnchantedForest_SourceFiles_v2\SourceFiles"
 
 ---
 
+## Multi-Pack Workflow Issues
+
+### Materials from Pack A Show Wrong Textures After Converting Pack B
+
+**Symptom**: After converting a second Synty pack to the same output directory, materials from the first pack now display incorrect textures.
+
+**Cause**: In earlier versions, the converter maintained a single global `mesh_material_mapping.json` and texture registry. Converting a new pack would overwrite these mappings, breaking references from previously converted packs.
+
+**Solution**: This issue was fixed in v2.2 with per-pack mapping. Each pack now maintains its own:
+- `mesh_material_mapping.json` in its pack folder
+- Texture references relative to its own structure
+
+**If you encounter this on an older version**:
+1. Update to v2.2 or later
+2. Re-convert Pack A with the new version
+3. Both packs will maintain independent mappings
+
+---
+
+### Converting a New Pack Re-processes All My Existing Packs
+
+**Symptom**: When you convert a new pack to an output folder that already contains converted packs, the converter processes materials and assets from all packs, not just the new one.
+
+**Cause**: Earlier versions scanned the entire output directory for assets to process.
+
+**Solution**: Fixed with pack targeting in v2.2. The converter now:
+1. Creates a dedicated subfolder for each pack
+2. Only processes assets within that pack's folder
+3. Leaves existing converted packs untouched
+
+**Workflow**:
+```bash
+# Convert first pack
+python converter.py --pack EnchantedForest --output C:\Godot\Projects\assets\synty
+
+# Convert second pack - only EnchantedDesert is processed
+python converter.py --pack EnchantedDesert --output C:\Godot\Projects\assets\synty
+```
+
+---
+
+## Shader and File Location Issues
+
+### I Moved My Shaders to a Custom Folder and Now Conversion Creates Duplicates
+
+**Symptom**: After relocating the generated shaders to a different folder in your project, running the converter again creates new shader copies in the original location.
+
+**Cause**: Earlier versions looked for shaders only in a fixed location relative to the output folder.
+
+**Solution**: Fixed with dynamic shader discovery. The converter now:
+1. Searches the entire Godot project for existing shader files by name
+2. Uses found shaders in their current location
+3. Only copies new shaders if they don't exist anywhere in the project
+
+**If you still see duplicates**:
+1. Delete the duplicate shaders in the output folder
+2. Ensure your relocated shaders have the same filename (e.g., `foliage.gdshader`)
+3. Re-run conversion - it will find and use your relocated shaders
+
+---
+
+### Conversion Fails at the End with Log File Error
+
+**Symptom**: Conversion completes all steps but fails at the end with an error about writing or accessing the log file.
+
+**Cause**: Earlier versions wrote the log file inside the pack's output folder. If that folder was being accessed by Godot or had permission issues, the log write would fail.
+
+**Solution**: Fixed by moving the log file to the project root. The log is now written to:
+```
+output_folder/conversion_log.txt
+```
+
+This location is outside any pack-specific folders and less likely to have access conflicts.
+
+---
+
 ## Material Issues
+
+### Some Meshes Show "Material not found" Warnings
+
+**Symptom**: During conversion, you see warnings like "Material not found for mesh 'SM_Mesh_Name'" and some meshes appear with default gray material in Godot.
+
+**Cause**: The material lookup couldn't find a matching material for the mesh. This can happen when:
+1. The mesh name doesn't match any entry in `MaterialList.txt`
+2. The material name in `MaterialList.txt` doesn't match any parsed material
+3. The pack has an incomplete or outdated `MaterialList.txt`
+
+**How the fallback system works**:
+1. **Primary**: Look up mesh in `mesh_material_mapping.json` (from MaterialList.txt)
+2. **Fallback 1**: Try to match mesh name to material name with common variations
+3. **Fallback 2**: Search for materials with similar names (fuzzy matching)
+4. **Fallback 3**: If mesh contains material hints (e.g., "Stone" in name), try matching
+
+**Solution**:
+1. Check `conversion_log.txt` for the specific mesh names
+2. Look in the pack's `mesh_material_mapping.json` to see what mappings exist
+3. Manually assign the correct material in Godot:
+   - Select the MeshInstance3D
+   - In the Inspector, expand "Surface Material Override"
+   - Drag the correct `.tres` material file onto the slot
+
+---
+
+### Mesh Uses Wrong Material
+
+**Symptom**: A mesh displays with an incorrect material - wrong color, wrong shader type, or completely different appearance than expected.
+
+**Cause**: The `mesh_material_mapping.json` contains an incorrect mapping, or the material name resolution matched the wrong material.
+
+**Diagnosis**:
+1. Open the pack folder in the output directory
+2. Check `mesh_material_mapping.json` for the mesh name:
+   ```json
+   {
+     "SM_Mesh_Name": "Expected_Material",
+     "SM_Problem_Mesh": "Wrong_Material"  // <-- incorrect mapping
+   }
+   ```
+3. Compare against the original `MaterialList.txt` in SourceFiles
+
+**Solutions**:
+
+1. **Edit the mapping**: Modify `mesh_material_mapping.json` directly:
+   ```json
+   "SM_Problem_Mesh": "Correct_Material"
+   ```
+   Then re-run the Godot import step or manually reassign in Godot.
+
+2. **Check MaterialList.txt**: If the mapping is correct but still wrong, the source `MaterialList.txt` may have errors. Cross-reference with how the mesh looks in Unity if available.
+
+3. **Manual override in Godot**: For one-off fixes, directly assign the material in the scene.
+
+---
 
 ### Wrong Shader Detected
 
@@ -343,6 +477,70 @@ dir materials\ExpectedMaterial.tres
 2. **Check MaterialList.txt**: Ensure the mesh is listed with its materials. Some Synty packs have incomplete MaterialList files.
 
 3. **Re-convert**: Sometimes a second conversion pass picks up materials that were parsed late.
+
+---
+
+### FBX Files in Custom Folders Aren't Found
+
+**Symptom**: You have FBX files in non-standard folder locations within SourceFiles, and the converter doesn't find or process them.
+
+**Cause**: Earlier versions only looked in specific expected locations like `SourceFiles/FBX/`.
+
+**Solution**: Fixed with recursive glob (`rglob`) discovery. The converter now:
+1. Searches the entire SourceFiles directory recursively
+2. Finds ALL `.fbx` files regardless of subfolder structure
+3. Preserves relative paths in the output
+
+**Current behavior**:
+```
+SourceFiles/
+  FBX/Models/Characters/Hero.fbx     ✓ Found
+  FBX/Props/Weapons/Sword.fbx        ✓ Found
+  CustomFolder/SpecialAssets/Gem.fbx ✓ Found (with rglob)
+  Animations/Walk.fbx                ✓ Found (with rglob)
+```
+
+**If FBX files are still not found**:
+1. Verify the `--source-files` path points to the correct root folder
+2. Check that files have the `.fbx` extension (case-insensitive on Windows)
+3. Look in `conversion_log.txt` for "Scanning for FBX files" output
+
+---
+
+### FBX Paths Have Extra SourceFiles/FBX Folders
+
+**Symptom**: Converted assets end up in deeply nested paths like:
+```
+output/POLYGON_Pack/SourceFiles/FBX/Models/Environment/Tree.fbx
+```
+instead of:
+```
+output/POLYGON_Pack/Models/Environment/Tree.fbx
+```
+
+**Cause**: Earlier versions preserved the full source path including intermediate folders.
+
+**Solution**: Fixed with path stripping. The converter now:
+1. Detects common intermediate folders (`SourceFiles`, `FBX`, `Source`)
+2. Strips these from output paths automatically
+3. Creates cleaner, more intuitive folder structures
+
+**Expected output structure**:
+```
+output/
+  POLYGON_Pack/
+    Models/
+      Characters/
+      Environment/
+      Props/
+    Materials/
+    Textures/
+```
+
+**If you still see nested paths**:
+1. Update to the latest converter version
+2. Delete the old output folder
+3. Re-run conversion to get clean paths
 
 ---
 

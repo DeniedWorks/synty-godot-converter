@@ -59,25 +59,32 @@ shader_parameter/leaf_base_color = Color(1.0, 0.9, 0.8, 1.0)
 
 ## Functions
 
-### generate_tres(material, shader_base, texture_base) -> str
+### generate_tres(material, shader_base, texture_base, shader_paths=None) -> str
 
 Main entry point for `.tres` generation. Converts a `MappedMaterial` into complete `.tres` file content.
 
 **Arguments:**
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `material` | `MappedMaterial` | The mapped material to convert |
-| `shader_base` | `str` | Resource path base for shaders (e.g., `"res://shaders"`) |
-| `texture_base` | `str` | Resource path base for textures (e.g., `"res://textures"`) |
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `material` | `MappedMaterial` | required | The mapped material to convert |
+| `shader_base` | `str` | required | Resource path base for shaders (e.g., `"res://shaders"`) |
+| `texture_base` | `str` | required | Resource path base for textures (e.g., `"res://textures"`) |
+| `shader_paths` | `dict[str, Path] \| None` | `None` | Optional mapping of shader names to their actual paths (for project-local shader resolution) |
 
 **Returns:** `str` - Complete `.tres` file content as a string
+
+**Behavior:**
+- If `shader_paths` is provided, uses the mapped path for the shader reference
+- If `shader_paths` is `None` or the shader isn't in the map, falls back to `shader_base/shader_file`
+- Enables using project-local shaders instead of bundled ones
 
 **Example:**
 
 ```python
 from tres_generator import generate_tres
 from shader_mapping import MappedMaterial
+from pathlib import Path
 
 material = MappedMaterial(
     name="Grass_01",
@@ -88,10 +95,22 @@ material = MappedMaterial(
     colors={}
 )
 
+# Without shader_paths (uses shader_base)
 content = generate_tres(
     material,
     shader_base="res://shaders",
     texture_base="res://textures"
+)
+
+# With shader_paths (uses project-local shaders)
+shader_paths = {
+    "foliage.gdshader": Path("C:/MyProject/assets/shaders/synty/foliage.gdshader")
+}
+content = generate_tres(
+    material,
+    shader_base="res://shaders",
+    texture_base="res://textures",
+    shader_paths=shader_paths
 )
 ```
 
@@ -126,7 +145,7 @@ write_tres_file(content, Path("output/materials/Grass_01.tres"))
 
 ---
 
-### generate_and_write_tres(material, output_dir, shader_base, texture_base) -> Path
+### generate_and_write_tres(material, output_dir, shader_base, texture_base, shader_paths=None) -> Path
 
 Convenience function that combines generation and writing in a single call.
 
@@ -134,10 +153,11 @@ Convenience function that combines generation and writing in a single call.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `material` | `MappedMaterial` | - | The mapped material to convert |
-| `output_dir` | `Path` | - | Directory to write the `.tres` file to |
+| `material` | `MappedMaterial` | required | The mapped material to convert |
+| `output_dir` | `Path` | required | Directory to write the `.tres` file to |
 | `shader_base` | `str` | `"res://shaders"` | Resource path base for shaders |
 | `texture_base` | `str` | `"res://textures"` | Resource path base for textures |
+| `shader_paths` | `dict[str, Path] \| None` | `None` | Optional mapping of shader names to their actual paths |
 
 **Returns:** `Path` - Path to the written `.tres` file
 
@@ -147,6 +167,7 @@ Convenience function that combines generation and writing in a single call.
 from pathlib import Path
 from tres_generator import generate_and_write_tres
 
+# Basic usage
 output_path = generate_and_write_tres(
     material,
     output_dir=Path("output/materials"),
@@ -154,6 +175,19 @@ output_path = generate_and_write_tres(
     texture_base="res://textures"
 )
 print(f"Written to: {output_path}")
+
+# With project-local shaders
+shader_paths = {
+    "polygon.gdshader": Path("C:/MyProject/assets/shaders/synty/polygon.gdshader"),
+    "foliage.gdshader": Path("C:/MyProject/assets/shaders/synty/foliage.gdshader"),
+}
+output_path = generate_and_write_tres(
+    material,
+    output_dir=Path("output/materials"),
+    shader_base="res://shaders",
+    texture_base="res://textures",
+    shader_paths=shader_paths
+)
 ```
 
 ---

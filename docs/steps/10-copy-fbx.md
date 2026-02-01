@@ -1,6 +1,6 @@
-# Step 9: Copy FBX Files
+# Step 10: Copy FBX Files
 
-This document provides comprehensive documentation for the FBX file copying step of the synty-converter pipeline. FBX copying is implemented in `converter.py` and involves discovering FBX model files from SourceFiles directories and copying them to the output directory while preserving subdirectory structure.
+This document provides comprehensive documentation for the FBX file copying step of the synty-converter pipeline. FBX copying is implemented in `converter.py` and involves discovering FBX model files from SourceFiles directories and copying them to the output directory.
 
 **Module Location:** `synty-converter/converter.py`
 
@@ -16,8 +16,9 @@ This document provides comprehensive documentation for the FBX file copying step
 
 - [Overview](#overview)
 - [FBX Discovery Process](#fbx-discovery-process)
-  - [Primary FBX Directory](#primary-fbx-directory)
-  - [Nested Structure Detection](#nested-structure-detection)
+  - [Simplified Discovery with rglob](#simplified-discovery-with-rglob)
+  - [Common Prefix Stripping](#common-prefix-stripping)
+  - [Path Structure Preservation](#path-structure-preservation)
   - [Case-Insensitive File Finding](#case-insensitive-file-finding)
   - [Duplicate Removal](#duplicate-removal)
 - [Core Function](#core-function)
@@ -46,32 +47,32 @@ This document provides comprehensive documentation for the FBX file copying step
 
 ## Overview
 
-Step 9 copies FBX model files from the SourceFiles directory to the output directory. This step prepares the raw 3D models for subsequent Godot import and conversion.
+Step 10 copies FBX model files from the SourceFiles directory to the output directory. This step prepares the raw 3D models for subsequent Godot import and conversion.
 
 ### Key Responsibilities
 
-1. **Discover FBX files** - Find all .fbx files recursively in source directories
-2. **Handle complex structures** - Support nested packs with multiple FBX/Models directories
-3. **Preserve structure** - Maintain subdirectory hierarchy (Props/, Environment/, Characters/)
+1. **Discover FBX files** - Use `rglob("*.fbx")` to find all FBX files recursively
+2. **Strip common prefixes** - Remove `SourceFiles/`, `FBX/`, `Models/` from paths
+3. **Preserve remaining structure** - Maintain remaining subdirectory hierarchy (Props/, Environment/, Characters/)
 4. **Avoid redundant copies** - Skip files that already exist with matching size
 5. **Support filtering** - Copy only FBX files matching an optional pattern
 
 ### Pipeline Position
 
 ```
-Step 8: Copy Textures
+Step 9: Copy Textures
         |
         v
-Step 9: Copy FBX Files  <-- You are here
+Step 10: Copy FBX Files  <-- You are here
         |
         v
-Step 10: Generate mesh_material_mapping.json
+Step 11: Generate mesh_material_mapping.json
         |
         v
-Step 11: Generate project.godot
+Step 12: Generate project.godot
         |
         v
-Step 12: Run Godot CLI
+Step 13: Run Godot CLI
 ```
 
 
@@ -79,49 +80,81 @@ Step 12: Run Godot CLI
 
 ## FBX Discovery Process
 
-### Primary FBX Directory
+### Simplified Discovery with rglob
 
-The converter first looks for the standard FBX directory location:
-
-```python
-# From converter.py lines 1938-1939
-fbx_dirs = [config.source_files / "FBX"]
-```
-
-For most Synty packs, this is `SourceFiles/FBX/` and contains all FBX model files.
-
-### Nested Structure Detection
-
-Some Synty packs (like POLYGON Dwarven Dungeon) have complex nested structures with multiple FBX or Models directories. The converter handles this:
+The converter now uses a simplified discovery approach using `rglob("*.fbx")`:
 
 ```python
-# From converter.py lines 1939-1947
-if not fbx_dirs[0].exists():
-    # Search for both FBX and Models directories
-    fbx_dirs = [d for d in config.source_files.rglob("FBX") if d.is_dir()]
-    models_dirs = [d for d in config.source_files.rglob("Models") if d.is_dir()]
-    fbx_dirs.extend(models_dirs)
-    if fbx_dirs:
-        logger.debug("Found %d FBX/Models directories in nested structure", len(fbx_dirs))
-        for fd in fbx_dirs:
-            logger.debug("  FBX/Models dir: %s", fd)
+# Find all FBX files recursively in SourceFiles
+fbx_files = list(config.source_files.rglob("*.fbx"))
+fbx_files.extend(config.source_files.rglob("*.FBX"))  # Case-insensitive
 ```
 
-This discovers all `FBX/` and `Models/` directories anywhere in the SourceFiles tree, allowing the converter to handle:
-- Standard packs with `SourceFiles/FBX/`
-- Nested packs with `SourceFiles/PackA/FBX/` and `SourceFiles/PackB/FBX/`
-- Packs using `Models/` instead of `FBX/` (e.g., Generic folders)
+This approach:
+- **No directory hunting** - Finds FBX files regardless of folder structure
+- **Works with any pack layout** - Standard `FBX/`, nested structures, or `Models/` folders
+- **Simpler code** - Single glob operation instead of directory search logic
+
+### Common Prefix Stripping
+
+When copying FBX files, common Synty prefixes are stripped from paths:
+
+```python
+COMMON_PREFIXES = ["SourceFiles", "FBX", "Models"]
+
+def strip_common_prefixes(path: Path) -> Path:
+    """Strip common Synty prefixes from a path."""
+    parts = list(path.parts)
+    while parts and parts[0] in COMMON_PREFIXES:
+        parts.pop(0)
+    return Path(*parts) if parts else path
+```
+
+**Examples:**
+
+| Source Path | After Stripping |
+|------------|-----------------|
+| `SourceFiles/FBX/Props/SM_Barrel.fbx` | `Props/SM_Barrel.fbx` |
+| `SourceFiles/FBX/SM_Tree.fbx` | `SM_Tree.fbx` |
+| `SourceFiles/Models/Environment/SM_Rock.fbx` | `Environment/SM_Rock.fbx` |
+| `FBX/Characters/SK_Character.fbx` | `Characters/SK_Character.fbx` |
+
+### Path Structure Preservation
+
+The remaining path structure is preserved after prefix stripping:
+
+```
+SourceFiles/
+  FBX/
+    Props/                    # Preserved as Props/
+      SM_Prop_Barrel.fbx
+    Environment/              # Preserved as Environment/
+      SM_Env_Tree.fbx
+    Characters/               # Preserved as Characters/
+      SK_Character.fbx
+```
+
+After copying to output:
+
+```
+output/
+  models/
+    Props/
+      SM_Prop_Barrel.fbx
+    Environment/
+      SM_Env_Tree.fbx
+    Characters/
+      SK_Character.fbx
+```
 
 ### Case-Insensitive File Finding
 
 FBX files are found using case-insensitive matching to handle Windows/macOS differences:
 
 ```python
-# From converter.py lines 977-980
 # Find all FBX files recursively (case-insensitive)
-dir_files = list(fbx_dir.rglob("*.fbx")) + list(fbx_dir.rglob("*.FBX"))
-for f in dir_files:
-    fbx_files.append((f, fbx_dir))
+fbx_files = list(source_files.rglob("*.fbx"))
+fbx_files.extend(source_files.rglob("*.FBX"))
 ```
 
 Both `.fbx` and `.FBX` patterns are searched to catch files regardless of extension case.
@@ -131,15 +164,14 @@ Both `.fbx` and `.FBX` patterns are searched to catch files regardless of extens
 Because Windows filesystems are case-insensitive, the same file could be found by both patterns. The converter removes duplicates:
 
 ```python
-# From converter.py lines 982-990
 # Remove duplicates (Windows is case-insensitive)
 seen_paths: set[Path] = set()
-unique_fbx_files: list[tuple[Path, Path]] = []
-for source_path, base_dir in fbx_files:
+unique_fbx_files: list[Path] = []
+for source_path in fbx_files:
     resolved = source_path.resolve()
     if resolved not in seen_paths:
         seen_paths.add(resolved)
-        unique_fbx_files.append((source_path, base_dir))
+        unique_fbx_files.append(source_path)
 fbx_files = unique_fbx_files
 ```
 
@@ -245,22 +277,23 @@ for source_path, base_dir in fbx_files:
 
 ### Path Preservation
 
-The key to structure preservation is the `relative_to()` calculation:
+The key to structure preservation is stripping common prefixes and keeping the rest:
 
 ```python
-relative_path = source_path.relative_to(base_dir)
+relative_path = strip_common_prefixes(source_path.relative_to(source_files))
 dest_path = output_models_dir / relative_path
 ```
 
 **Example path mapping:**
 
-| Source Path | Base Dir | Relative Path | Destination |
-|------------|----------|---------------|-------------|
-| `SourceFiles/FBX/Props/SM_Prop_Barrel.fbx` | `SourceFiles/FBX` | `Props/SM_Prop_Barrel.fbx` | `output/models/Props/SM_Prop_Barrel.fbx` |
-| `SourceFiles/FBX/Characters/SK_Character.fbx` | `SourceFiles/FBX` | `Characters/SK_Character.fbx` | `output/models/Characters/SK_Character.fbx` |
-| `SourceFiles/FBX/SM_Env_Tree.fbx` | `SourceFiles/FBX` | `SM_Env_Tree.fbx` | `output/models/SM_Env_Tree.fbx` |
+| Source Path | After Prefix Strip | Destination |
+|------------|-------------------|-------------|
+| `SourceFiles/FBX/Props/SM_Prop_Barrel.fbx` | `Props/SM_Prop_Barrel.fbx` | `output/models/Props/SM_Prop_Barrel.fbx` |
+| `SourceFiles/FBX/Characters/SK_Character.fbx` | `Characters/SK_Character.fbx` | `output/models/Characters/SK_Character.fbx` |
+| `SourceFiles/FBX/SM_Env_Tree.fbx` | `SM_Env_Tree.fbx` | `output/models/SM_Env_Tree.fbx` |
+| `SourceFiles/Models/Environment/SM_Rock.fbx` | `Environment/SM_Rock.fbx` | `output/models/Environment/SM_Rock.fbx` |
 
-This ensures subdirectory structures like `Props/`, `Environment/`, `Characters/` are maintained.
+This ensures subdirectory structures like `Props/`, `Environment/`, `Characters/` are maintained while removing the `SourceFiles/FBX/` or `SourceFiles/Models/` wrapper directories.
 
 ### Skip Logic
 
@@ -358,7 +391,7 @@ SourceFiles/
       SM_Prop_Chest_01.fbx
 ```
 
-After copying:
+After copying (with `SourceFiles/FBX/` stripped):
 
 ```
 output/
@@ -376,7 +409,7 @@ output/
 
 ### Complex Nested Structure
 
-Some packs have multiple FBX directories:
+Some packs have multiple FBX or Models directories. The `rglob` approach handles these seamlessly:
 
 ```
 SourceFiles/
@@ -390,15 +423,19 @@ SourceFiles/
       SM_DungeonB_Door.fbx
 ```
 
-The converter discovers all these directories and copies each file relative to its own base directory:
+After copying (with common prefixes stripped):
 
 ```
 output/
   models/
-    SM_DungeonA_Door.fbx    # from DungeonA/FBX/
-    SM_DungeonA_Wall.fbx    # from DungeonA/Models/
-    SM_DungeonB_Door.fbx    # from DungeonB/FBX/
+    DungeonA/
+      SM_DungeonA_Door.fbx     # SourceFiles/DungeonA/FBX/ stripped
+      SM_DungeonA_Wall.fbx     # SourceFiles/DungeonA/Models/ stripped
+    DungeonB/
+      SM_DungeonB_Door.fbx     # SourceFiles/DungeonB/FBX/ stripped
 ```
+
+The structure after `SourceFiles/` is preserved, with only the common `FBX/` or `Models/` directories stripped when they appear directly under a pack subfolder.
 
 ### Parent Directory Creation
 
@@ -791,4 +828,4 @@ These fields exist in the actual code (lines 295-297) but are not in the API doc
 
 ---
 
-*Last Updated: 2026-01-31*
+*Last Updated: 2026-02-01*

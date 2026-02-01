@@ -227,16 +227,16 @@ mesh_map = get_mesh_to_materials_map(prefabs)
 
 ---
 
-### generate_mesh_material_mapping_json(prefabs, output_path, *, indent=2) -> None
+### generate_mesh_material_mapping_json(prefabs, pack_folder, *, indent=2) -> None
 
-Generates `mesh_material_mapping.json` for the GDScript converter.
+Generates `mesh_material_mapping.json` for the GDScript converter. Writes to the pack folder for per-pack material mapping.
 
 **Arguments:**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `prefabs` | `list[PrefabMaterials]` | - | List of prefabs from `parse_material_list()` |
-| `output_path` | `Path` | - | Path where the JSON file will be written |
+| `pack_folder` | `Path` | - | Pack folder where the JSON file will be written |
 | `indent` | `int` | `2` | JSON indentation level (keyword-only) |
 
 **Returns:** `None`
@@ -246,7 +246,8 @@ Generates `mesh_material_mapping.json` for the GDScript converter.
 
 **Side Effects:**
 - Creates parent directories if they don't exist
-- Writes JSON file with UTF-8 encoding
+- Writes JSON file with UTF-8 encoding to `{pack_folder}/mesh_material_mapping.json`
+- Does NOT merge with existing file (overwrites)
 
 **Example:**
 
@@ -257,8 +258,9 @@ from material_list import parse_material_list, generate_mesh_material_mapping_js
 prefabs = parse_material_list(Path("MaterialList.txt"))
 generate_mesh_material_mapping_json(
     prefabs,
-    Path("output/mesh_material_mapping.json")
+    Path("output/PolygonNature_SourceFiles")  # Pack folder
 )
+# Writes to: output/PolygonNature_SourceFiles/mesh_material_mapping.json
 ```
 
 **Output Format:**
@@ -275,6 +277,8 @@ generate_mesh_material_mapping_json(
   ]
 }
 ```
+
+**Note:** Unlike previous versions, this function no longer merges with an existing `mesh_material_mapping.json` file. Each pack gets its own independent mapping file in its pack folder.
 
 ---
 

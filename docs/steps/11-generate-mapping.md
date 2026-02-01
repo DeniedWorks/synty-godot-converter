@@ -1,10 +1,10 @@
-# Step 10: Generate mesh_material_mapping.json
+# Step 11: Generate mesh_material_mapping.json
 
 This document provides comprehensive documentation for the generation of `mesh_material_mapping.json`, the critical data bridge between the Python conversion pipeline and the Godot CLI phase.
 
 **Related Files:**
 - `material_list.py` - Contains `generate_mesh_material_mapping_json()` function
-- `converter.py` - Orchestrates the generation as Step 10 in the pipeline
+- `converter.py` - Orchestrates the generation as Step 11 in the pipeline
 - `godot_converter.gd` - Consumes the JSON in Godot headless mode
 
 **Related Documentation:**
@@ -17,6 +17,9 @@ This document provides comprehensive documentation for the generation of `mesh_m
 ## Table of Contents
 
 - [Overview](#overview)
+- [Per-Pack Output](#per-pack-output)
+  - [Output Location](#output-location)
+  - [No Merge Logic](#no-merge-logic)
 - [Purpose and Role in Pipeline](#purpose-and-role-in-pipeline)
 - [JSON Structure and Schema](#json-structure-and-schema)
   - [Format Specification](#format-specification)
@@ -28,7 +31,6 @@ This document provides comprehensive documentation for the generation of `mesh_m
   - [Implementation Details](#implementation-details)
 - [Integration with Converter Pipeline](#integration-with-converter-pipeline)
   - [Step Sequence](#step-sequence)
-  - [Output Location](#output-location)
   - [Dry Run Handling](#dry-run-handling)
 - [How Godot CLI Uses the JSON](#how-godot-cli-uses-the-json)
   - [Loading the Mapping](#loading-the-mapping)
@@ -66,10 +68,61 @@ The JSON mapping file is the data handoff mechanism between these phases. It enc
 |---------------|-------|
 | Format | JSON (RFC 8259 compliant) |
 | Encoding | UTF-8 |
-| Location | `{output}/shaders/mesh_material_mapping.json` |
+| Location | `{output}/{pack}/mesh_material_mapping.json` |
 | Size | Typically 50KB-500KB depending on pack |
 | Consumers | `godot_converter.gd` |
 | Producers | `material_list.py` via `generate_mesh_material_mapping_json()` |
+
+---
+
+## Per-Pack Output
+
+### Output Location
+
+The mapping JSON is now written to the pack's own directory, not a shared location:
+
+```
+output/
+  POLYGON_NatureBiomes/
+    mesh_material_mapping.json    <-- Per-pack mapping
+    materials/
+    models/
+    meshes/
+  POLYGON_Fantasy/
+    mesh_material_mapping.json    <-- Separate mapping for each pack
+    materials/
+    models/
+    meshes/
+```
+
+**Previous location (deprecated):**
+```
+output/
+  shaders/
+    mesh_material_mapping.json    # Was shared across all packs
+```
+
+**Current location:**
+```
+output/
+  {pack_name}/
+    mesh_material_mapping.json    # Isolated per pack
+```
+
+### No Merge Logic
+
+Each pack conversion generates its own complete mapping file:
+
+- **Isolated data** - Each pack's mapping contains only its own mesh-material relationships
+- **No conflicts** - Multiple packs can have meshes with the same name without collision
+- **Simpler logic** - No need to merge or deduplicate across packs
+- **Clean re-runs** - Re-converting a pack completely replaces its mapping
+
+```python
+# Each pack gets its own mapping file
+mapping_output = pack_output_dir / "mesh_material_mapping.json"
+generate_mesh_material_mapping_json(prefabs, mapping_output)
+```
 
 ---
 
@@ -332,29 +385,29 @@ def generate_mesh_material_mapping_json(
 
 ### Step Sequence
 
-The JSON generation occurs as Step 10 in the converter pipeline:
+The JSON generation occurs as Step 11 in the converter pipeline:
 
 ```
-Step 8:  Copy Textures
-Step 9:  Copy FBX Files
-Step 10: Generate mesh_material_mapping.json  <-- This step
-Step 11: Generate project.godot
-Step 12: Run Godot CLI
+Step 9:  Copy Textures
+Step 10: Copy FBX Files
+Step 11: Generate mesh_material_mapping.json  <-- This step
+Step 12: Generate project.godot
+Step 13: Run Godot CLI
 ```
 
-### Pipeline Code (converter.py lines 1977-2018)
+### Pipeline Code
 
 ```python
-# Step 10: Generate mesh_material_mapping.json (uses prefabs parsed in Step 4.5)
-# Note: mapping goes to shaders_dir to be shared across packs
-logger.info("Step 10: Generating mesh material mapping...")
+# Step 11: Generate mesh_material_mapping.json (uses prefabs parsed in Step 4.5)
+# Note: mapping goes to pack directory (per-pack isolation)
+logger.info("Step 11: Generating mesh material mapping...")
 if prefabs:
-    mapping_output = shaders_dir / "mesh_material_mapping.json"
+    mapping_output = pack_output_dir / "mesh_material_mapping.json"
     if config.dry_run:
         logger.debug("[DRY RUN] Would write mesh_material_mapping.json")
     else:
         generate_mesh_material_mapping_json(prefabs, mapping_output)
-        logger.debug("Generated mesh_material_mapping.json")
+        logger.debug("Generated mesh_material_mapping.json at %s", mapping_output)
 
     # Check for missing material references (no placeholders - just warn)
     if not config.dry_run:
@@ -385,25 +438,6 @@ else:
     logger.debug("No MaterialList data available, skipping mesh-material mapping")
 ```
 
-### Output Location
-
-The JSON is written to the `shaders/` directory in the output:
-
-```
-{output_dir}/
-    shaders/
-        mesh_material_mapping.json    <-- Generated here
-        polygon.gdshader
-        foliage.gdshader
-        ...
-    {pack_name}/
-        materials/
-        models/
-        meshes/
-```
-
-**Rationale:** The `shaders/` directory is shared across all packs in a project, making the mapping accessible to Godot regardless of which pack is being processed.
-
 ### Dry Run Handling
 
 When `--dry-run` is specified:
@@ -420,20 +454,21 @@ The `godot_converter.gd` script loads and uses the mapping JSON during mesh conv
 
 ### Loading the Mapping
 
-**Location in code:** `godot_converter.gd` lines 270-306
+The Godot converter loads the per-pack mapping file:
 
 ```gdscript
-func load_material_mapping() -> bool:
-    const MAPPING_PATH := "res://shaders/mesh_material_mapping.json"
+func load_material_mapping(pack_folder: String) -> bool:
+    # Per-pack mapping file location
+    var mapping_path := pack_folder + "/mesh_material_mapping.json"
 
-    if not FileAccess.file_exists(MAPPING_PATH):
-        printerr("Material mapping file not found: %s" % MAPPING_PATH)
+    if not FileAccess.file_exists(mapping_path):
+        printerr("Material mapping file not found: %s" % mapping_path)
         return false
 
-    var file := FileAccess.open(MAPPING_PATH, FileAccess.READ)
+    var file := FileAccess.open(mapping_path, FileAccess.READ)
     if file == null:
         printerr("Failed to open mapping file: %s (error: %s)" % [
-            MAPPING_PATH,
+            mapping_path,
             error_string(FileAccess.get_open_error())
         ])
         return false
@@ -461,6 +496,8 @@ func load_material_mapping() -> bool:
 
     return true
 ```
+
+**Key change:** The mapping is loaded from the pack folder (`res://POLYGON_NatureBiomes/mesh_material_mapping.json`) rather than a shared location.
 
 ### Mesh Name Resolution
 
@@ -835,4 +872,4 @@ Add to the following docs:
 
 ---
 
-*Last Updated: 2026-01-31*
+*Last Updated: 2026-02-01*

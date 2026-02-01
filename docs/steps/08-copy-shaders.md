@@ -1,6 +1,6 @@
-# Step 7: Copy Shaders
+# Step 8: Resolve Shader Paths
 
-This document provides comprehensive documentation for the shader copying step in the Synty Shader Converter pipeline, including details on all 7 community drop-in shaders.
+This document provides comprehensive documentation for the shader path resolution step in the Synty Shader Converter pipeline, including details on all 7 community drop-in shaders.
 
 **Module Location:** `synty-converter/converter.py` function `copy_shaders()`
 
@@ -16,6 +16,10 @@ This document provides comprehensive documentation for the shader copying step i
 ## Table of Contents
 
 - [Overview](#overview)
+- [Shader Path Resolution](#shader-path-resolution)
+  - [get_shader_paths() Function](#get_shader_paths-function)
+  - [Project-Wide Shader Search](#project-wide-shader-search)
+  - [Using Found Paths in Materials](#using-found-paths-in-materials)
 - [Shader Files](#shader-files)
   - [SHADER_FILES Constant](#shader_files-constant)
   - [Output Directory Structure](#output-directory-structure)
@@ -44,29 +48,100 @@ This document provides comprehensive documentation for the shader copying step i
 
 ## Overview
 
-Step 7 copies the 7 community-developed Godot shaders from the converter's `shaders/` directory to the output project's `shaders/` directory. These shaders are drop-in replacements for Unity's Synty shaders, implementing equivalent visual effects in Godot's shading language.
+Step 8 resolves shader paths by searching the entire Godot project for existing shaders. If shaders are found, their existing paths are used in material files. Only missing shaders are copied from the converter's `shaders/` directory.
+
+These shaders are drop-in replacements for Unity's Synty shaders, implementing equivalent visual effects in Godot's shading language.
 
 ### Key Responsibilities
 
-1. **Deploy shader files** - Copy all `.gdshader` files to output project
-2. **Handle existing files** - Skip copying if shader already exists (for multi-pack conversions)
-3. **Maintain shared directory** - Shaders are stored at project root, shared across all converted packs
-4. **Track statistics** - Report number of shaders copied for conversion summary
+1. **Search project for shaders** - Use `get_shader_paths()` to find existing shaders anywhere in the project
+2. **Use found paths** - Materials reference shaders at their discovered locations (not hardcoded `res://shaders/`)
+3. **Copy only missing shaders** - Skip copying if shader already exists elsewhere in the project
+4. **Handle existing files** - Support multi-pack conversions with shared shader directories
+5. **Track statistics** - Report number of shaders copied for conversion summary
 
 ### Position in Pipeline
 
 ```
-Step 6: Generate material .tres files
+Step 7: Generate material .tres files
         |
         v
-Step 7: Copy .gdshader files   <-- THIS STEP
+Step 8: Resolve shader paths   <-- THIS STEP
         |
         v
-Step 8: Copy texture files
+Step 9: Copy texture files
         |
         v
-Step 9: Copy FBX files
+Step 10: Copy FBX files
 ```
+
+---
+
+## Shader Path Resolution
+
+### get_shader_paths() Function
+
+The converter now uses a new function to discover existing shader locations:
+
+```python
+def get_shader_paths(project_dir: Path) -> dict[str, str]:
+    """Search entire project for existing shaders and return their res:// paths.
+
+    Args:
+        project_dir: Root directory of the Godot project.
+
+    Returns:
+        Dictionary mapping shader filename to res:// path.
+        Example: {"polygon.gdshader": "res://assets/shaders/synty/polygon.gdshader"}
+    """
+```
+
+**Key behavior:**
+- Searches the entire project directory recursively for `.gdshader` files
+- Returns a mapping from shader filename to its `res://` path
+- Enables materials to reference shaders at their actual locations
+
+### Project-Wide Shader Search
+
+The search process:
+
+1. **Recursive glob** - Uses `project_dir.rglob("*.gdshader")` to find all shader files
+2. **Path conversion** - Converts absolute paths to `res://` format
+3. **Filename mapping** - Maps each shader's filename to its full path
+
+```python
+shader_paths = {}
+for shader_file in project_dir.rglob("*.gdshader"):
+    relative_path = shader_file.relative_to(project_dir)
+    res_path = f"res://{relative_path.as_posix()}"
+    shader_paths[shader_file.name] = res_path
+```
+
+**Example results:**
+
+```python
+{
+    "polygon.gdshader": "res://assets/shaders/synty/polygon.gdshader",
+    "foliage.gdshader": "res://assets/shaders/synty/foliage.gdshader",
+    "water.gdshader": "res://assets/shaders/synty/water.gdshader",
+}
+```
+
+### Using Found Paths in Materials
+
+Materials now reference shaders at their discovered locations instead of a hardcoded path:
+
+**Before (hardcoded):**
+```ini
+[ext_resource type="Shader" path="res://shaders/polygon.gdshader" id="1"]
+```
+
+**After (discovered path):**
+```ini
+[ext_resource type="Shader" path="res://assets/shaders/synty/polygon.gdshader" id="1"]
+```
+
+This allows projects to organize shaders in their preferred location while still being able to convert new Synty packs.
 
 ---
 
@@ -92,33 +167,33 @@ SHADER_FILES = [
 
 ### Output Directory Structure
 
-Shaders are copied to a shared `shaders/` directory at the output project root:
+Shaders can exist anywhere in the project. The converter searches for them and uses their found paths:
 
 ```
 output-project/
-  project.godot              # With global shader uniforms
-  shaders/                   # <-- Shader destination
-    clouds.gdshader
-    crystal.gdshader
-    foliage.gdshader
-    particles.gdshader
-    polygon.gdshader         # Default/most common shader
-    skydome.gdshader
-    water.gdshader
-  POLYGON_NatureBiomes/      # Pack-specific directories
+  project.godot                      # With global shader uniforms
+  assets/
+    shaders/
+      synty/                         # <-- Example: shaders in custom location
+        clouds.gdshader
+        crystal.gdshader
+        foliage.gdshader
+        particles.gdshader
+        polygon.gdshader
+        skydome.gdshader
+        water.gdshader
+  shaders/                           # <-- Fallback: default location for missing shaders
+  POLYGON_NatureBiomes/
     textures/
-    materials/
-    models/
-  POLYGON_Fantasy/
-    textures/
-    materials/
+    materials/                       # Materials reference shaders at found paths
     models/
 ```
 
-**Key design decision:** Shaders are stored at project root rather than per-pack because:
-- Multiple packs share the same shaders
-- Materials reference `res://shaders/polygon.gdshader` etc.
-- Reduces duplication when converting multiple packs
+**Key design decision:** Shaders can be stored anywhere in the project:
+- `get_shader_paths()` searches the entire project for existing shaders
+- Materials reference shaders at their discovered locations
+- Only missing shaders are copied to the default `shaders/` directory
+- Supports existing project organizations without forcing a specific structure
 
 ---
 
@@ -127,12 +202,20 @@ output-project/
 ### Function Signature
 
 ```python
-def copy_shaders(shaders_dest: Path, dry_run: bool) -> int:
+def copy_shaders(
+    shaders_dest: Path,
+    dry_run: bool,
+    existing_shader_paths: dict[str, str] | None = None
+) -> int:
     """Copy .gdshader files from project's shaders/ to destination.
+
+    Only copies shaders that don't already exist in the project.
 
     Args:
         shaders_dest: Destination directory for shader files.
         dry_run: If True, only log what would be copied.
+        existing_shader_paths: Optional dict of shader filename to existing res:// path.
+            If a shader exists in this dict, it won't be copied.
 
     Returns:
         Number of shader files copied (or would be copied in dry run).
@@ -141,76 +224,67 @@ def copy_shaders(shaders_dest: Path, dry_run: bool) -> int:
 
 ### Implementation Details
 
-**Full implementation:**
+**Key behavior changes:**
 
-```python
-def copy_shaders(shaders_dest: Path, dry_run: bool) -> int:
-    # Source shaders are relative to where this script is located
-    script_dir = Path(__file__).parent
-    shaders_source = script_dir / "shaders"
-
-    # Ensure destination directory exists
-    if not dry_run:
-        shaders_dest.mkdir(parents=True, exist_ok=True)
-
-    copied = 0
-    skipped = 0
-    for shader_file in SHADER_FILES:
-        source_path = shaders_source / shader_file
-        dest_path = shaders_dest / shader_file
-
-        if not source_path.exists():
-            logger.warning("Shader file not found: %s", source_path)
-            continue
-
-        # Skip if shader already exists (shared shaders persist across packs)
-        if dest_path.exists():
-            logger.debug("Shader already exists, skipping: %s", shader_file)
-            skipped += 1
-            continue
-
-        if dry_run:
-            logger.debug("[DRY RUN] Would copy shader: %s -> %s", source_path, dest_path)
-        else:
-            shutil.copy2(source_path, dest_path)
-            logger.debug("Copied shader: %s", shader_file)
-
-        copied += 1
-
-    if skipped > 0:
-        logger.debug("Copied %d shader files (%d already existed)", copied, skipped)
-    else:
-        logger.debug("Copied %d shader files", copied)
-    return copied
-```
+1. **Check existing paths first** - If a shader is found via `get_shader_paths()`, skip copying
+2. **Only copy missing shaders** - Reduces file duplication in projects with existing shaders
+3. **Use found paths in materials** - Materials reference shaders at their discovered locations
 
 **Step-by-step flow:**
 
 1. **Locate source shaders** - Find the converter's `shaders/` directory relative to `converter.py`
-2. **Create destination** - Ensure `output/shaders/` exists (unless dry run)
-3. **Iterate SHADER_FILES** - Process each shader in the constant list
-4. **Check source exists** - Warn and skip if shader file is missing
-5. **Check destination exists** - Skip if already copied (multi-pack support)
-6. **Copy file** - Use `shutil.copy2()` to preserve metadata
+2. **Check existing paths** - If shader already exists in project (via `existing_shader_paths`), skip
+3. **Create destination** - Ensure `output/shaders/` exists (unless dry run)
+4. **Iterate SHADER_FILES** - Process each shader in the constant list
+5. **Check source exists** - Warn and skip if shader file is missing
+6. **Check destination exists** - Skip if already copied to destination
+7. **Copy file** - Use `shutil.copy2()` to preserve metadata
+
+**Example with existing shaders:**
+
+```python
+# Search project for existing shaders
+existing_paths = get_shader_paths(project_dir)
+# Returns: {"polygon.gdshader": "res://assets/shaders/synty/polygon.gdshader", ...}
+
+# Copy only shaders not found in project
+copied = copy_shaders(
+    shaders_dest=project_dir / "shaders",
+    dry_run=False,
+    existing_shader_paths=existing_paths
+)
+# polygon.gdshader exists at res://assets/shaders/synty/ - not copied
+# crystal.gdshader not found - copied to res://shaders/
+```
 
 ### Skip Logic for Existing Shaders
 
-The function skips copying if the destination file already exists:
+The function has two layers of skip logic:
+
+**1. Skip if shader exists anywhere in project (via `get_shader_paths()`):**
+
+```python
+if existing_shader_paths and shader_file in existing_shader_paths:
+    logger.debug("Shader found in project at %s, skipping copy", existing_shader_paths[shader_file])
+    skipped += 1
+    continue
+```
+
+**2. Skip if shader exists at destination:**
 
 ```python
 if dest_path.exists():
-    logger.debug("Shader already exists, skipping: %s", shader_file)
+    logger.debug("Shader already exists at destination, skipping: %s", shader_file)
     skipped += 1
     continue
 ```
 
 **Why this matters:**
 
-When converting multiple Synty packs to the same output project, the first conversion copies all shaders. Subsequent conversions skip copying because the shaders already exist. This:
-
-- Prevents unnecessary file operations
-- Preserves any manual shader customizations
-- Maintains consistent behavior across incremental conversions
+- **Project-wide search** - Shaders can live anywhere in the project (e.g., `res://assets/shaders/synty/`)
+- **No duplication** - Won't copy a shader that already exists elsewhere
+- **Preserves customizations** - Manual shader modifications are not overwritten
+- **Multi-pack support** - Subsequent conversions skip copying because shaders exist
 
 ### Error Handling
 
@@ -883,4 +957,4 @@ Add to the following docs:
 
 ---
 
-*Last Updated: 2026-01-31*
+*Last Updated: 2026-02-01*

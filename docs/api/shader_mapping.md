@@ -646,7 +646,12 @@ TEXTURE_MAP_FOLIAGE = {
     "_Leaves_NoiseTexture": "leaf_color",
     "_Tree_NoiseTexture": "trunk_color",
 }
+
+# Common texture property (used across multiple shaders)
+# "_Texture" -> "base_texture" (generic base texture mapping)
 ```
+
+**Note:** The `_Texture` property maps to `base_texture` for generic materials that use a simple texture reference. This provides a fallback for materials that don't use the more specific texture property names.
 
 ### FLOAT_MAPS
 
