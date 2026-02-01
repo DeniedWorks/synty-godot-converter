@@ -1727,21 +1727,26 @@ def generate_project_godot(
         logger.debug("Wrote project.godot with project name '%s'", pack_name)
 
 
-def write_conversion_log(output_dir: Path, stats: ConversionStats, config: ConversionConfig) -> None:
+def write_conversion_log(project_dir: Path, pack_name: str, stats: ConversionStats, config: ConversionConfig) -> None:
     """Write a summary log file with all warnings and errors.
 
+    Appends to existing log file so multiple pack conversions accumulate.
+
     Args:
-        output_dir: Output directory where conversion_log.txt will be written.
+        project_dir: Project root directory (next to project.godot).
+        pack_name: Name of the pack being converted.
         stats: Conversion statistics.
         config: Conversion configuration.
     """
-    log_path = output_dir / "conversion_log.txt"
+    log_path = project_dir / "conversion_log.txt"
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     lines = [
-        "=" * 60,
-        "Synty Shader Converter - Conversion Log",
-        "=" * 60,
-        f"Date: {datetime.now().isoformat()}",
+        "",
+        "=" * 80,
+        f"Conversion: {pack_name}",
+        f"Date: {timestamp}",
+        "=" * 80,
         f"Unity Package: {config.unity_package}",
         f"Source Files: {config.source_files}",
         f"Output Directory: {config.output_dir}",
@@ -1778,10 +1783,13 @@ def write_conversion_log(output_dir: Path, stats: ConversionStats, config: Conve
             lines.append(f"  - {error}")
         lines.append("")
 
-    lines.append("=" * 60)
+    lines.append("=" * 80)
+    lines.append("")
 
-    log_path.write_text("\n".join(lines), encoding="utf-8")
-    logger.debug("Wrote conversion log to: %s", log_path)
+    # Append to existing log file (accumulates across multiple pack conversions)
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    logger.debug("Appended conversion log to: %s", log_path)
 
 
 def print_summary(stats: ConversionStats) -> None:
@@ -2389,9 +2397,9 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
             logger.info("Step 12: Skipping Godot CLI...")
 
         # Write conversion log (not in dry run for the log file itself)
-        # Note: log goes to shaders_dir to be shared across packs
+        # Note: log goes to project root (next to project.godot) and appends
         if not config.dry_run:
-            write_conversion_log(shaders_dir, stats, config)
+            write_conversion_log(project_dir, pack_name, stats, config)
 
         return stats
 
