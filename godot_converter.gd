@@ -753,9 +753,10 @@ func extract_and_save_mesh(mesh_instance: MeshInstance3D, relative_dir: String, 
 
 
 ## Looks up material names for a mesh by name.
-## Tries exact match first, then various fallback patterns for common naming
-## conventions (SK_ to SM_, _Static suffix, etc.), then strips numeric suffixes
-## added by Godot import (like "_001", "_002").
+## Uses comprehensive fallback system:
+## 1. Try exact match
+## 2. Generate all name variations (prefix swaps, suffix removal, combinations)
+## 3. Try fuzzy matching (Levenshtein distance <= 2) as last resort
 ##
 ## @param mesh_name The mesh name to look up (e.g., "SM_Prop_Crystal_01_001").
 ## @returns Array[String] Material names for each surface. May contain empty strings
@@ -766,31 +767,35 @@ func get_material_names_for_mesh(mesh_name: String) -> Array[String]:
 
 	# Try exact match first
 	if not mesh_to_materials.has(lookup_name):
-		# Try fallback patterns BEFORE stripping numeric suffix
-		# (important: SM_Wep_Axe_01 in mapping, SK_Wep_Axe_01 in FBX)
-		var fallback_name := _try_material_fallbacks(mesh_name)
-		if not fallback_name.is_empty():
-			lookup_name = fallback_name
-		else:
-			# Try stripping numeric suffixes like "_001", "_002" (Godot import adds these)
-			var base_name := _strip_numeric_suffix(mesh_name)
-			if base_name != mesh_name and mesh_to_materials.has(base_name):
-				lookup_name = base_name
+		# Generate all possible name variations and try each
+		var variations := _generate_name_variations(mesh_name)
+		var found := false
+
+		for variation in variations:
+			if mesh_to_materials.has(variation):
+				print("      Fallback: '%s' -> '%s'" % [mesh_name, variation])
+				lookup_name = variation
+				found = true
+				break
+
+		if not found:
+			# Last resort: fuzzy matching (Levenshtein distance <= 2)
+			var fuzzy_match := _try_fuzzy_match(mesh_name, 2)
+			if not fuzzy_match.is_empty():
+				print("      Fuzzy match: '%s' -> '%s'" % [mesh_name, fuzzy_match])
+				lookup_name = fuzzy_match
+				found = true
+
+		if not found:
+			# Final fallback: use default material if available
+			if not default_material_name.is_empty():
+				print("      Using default material for mesh '%s': %s" % [mesh_name, default_material_name])
+				material_names_result.append(default_material_name)
+				return material_names_result
 			else:
-				# Try fallbacks on stripped name too
-				fallback_name = _try_material_fallbacks(base_name) if base_name != mesh_name else ""
-				if not fallback_name.is_empty():
-					lookup_name = fallback_name
-				else:
-					# Final fallback: use default material if available
-					if not default_material_name.is_empty():
-						print("      Using default material for mesh '%s': %s" % [mesh_name, default_material_name])
-						material_names_result.append(default_material_name)
-						return material_names_result
-					else:
-						print("      Warning: No material mapping for mesh '%s'" % mesh_name)
-						warnings += 1
-						return material_names_result
+				print("      Warning: No material mapping for mesh '%s'" % mesh_name)
+				warnings += 1
+				return material_names_result
 
 	var material_names = mesh_to_materials[lookup_name]
 
@@ -814,62 +819,180 @@ func get_material_names_for_mesh(mesh_name: String) -> Array[String]:
 	return material_names_result
 
 
-## Tries fallback patterns to find material mapping for a mesh name.
-## This handles common naming mismatches in Synty asset packs where mesh
-## names in FBX files differ from their MaterialList.txt entries.
+## Generates all possible name variations for fallback matching.
+## Combines multiple transformations to handle various naming mismatches.
 ##
-## Fallback order:
-## 1. SK_ to SM_ conversion (skeletal meshes often share materials with static meshes)
-## 2. Remove _Static suffix (static variants use base mesh materials)
-## 3. Remove _Preset suffix (preset variants use base mesh materials)
-## 4. Remove sub-component suffixes (_Cork, _Liquid, _Handle, _Door_X, _Drawer_X, etc.)
+## Transformations applied:
+## - Prefix swaps: SK_ <-> SM_
+## - Suffix removal: _Static, _Preset, component suffixes
+## - Godot numeric suffix stripping: _001, _002, etc.
 ##
-## @param mesh_name The mesh name to find fallbacks for.
-## @returns String The fallback mesh name that was found in the mapping, or empty string if none found.
-func _try_material_fallbacks(mesh_name: String) -> String:
-	# Fallback 1: SK_ to SM_ conversion
-	# Skeletal meshes (SK_) often share materials with their static mesh (SM_) counterparts
-	if mesh_name.begins_with("SK_"):
-		var sm_name := "SM_" + mesh_name.substr(3)
-		if mesh_to_materials.has(sm_name):
-			print("      Fallback: '%s' -> '%s' (SK_ to SM_)" % [mesh_name, sm_name])
-			return sm_name
+## @param mesh_name The original mesh name.
+## @returns Array[String] All possible name variations (excluding original).
+func _generate_name_variations(mesh_name: String) -> Array[String]:
+	var variations: Array[String] = []
+	var base_names: Array[String] = [mesh_name]
 
-	# Fallback 2: Remove _Static suffix
-	# Static variants (e.g., "SM_Prop_Barrel_Static") use base mesh materials ("SM_Prop_Barrel")
-	if mesh_name.ends_with("_Static"):
-		var base_name := mesh_name.substr(0, mesh_name.length() - 7)  # len("_Static") = 7
-		if mesh_to_materials.has(base_name):
-			print("      Fallback: '%s' -> '%s' (removed _Static)" % [mesh_name, base_name])
-			return base_name
+	# Step 1: Generate base name variants (strip Godot-added numeric suffixes)
+	var stripped := _strip_numeric_suffix(mesh_name)
+	if stripped != mesh_name:
+		base_names.append(stripped)
 
-	# Fallback 3: Remove _Preset suffix
-	# Preset variants use base mesh materials
-	if mesh_name.ends_with("_Preset"):
-		var base_name := mesh_name.substr(0, mesh_name.length() - 7)  # len("_Preset") = 7
-		if mesh_to_materials.has(base_name):
-			print("      Fallback: '%s' -> '%s' (removed _Preset)" % [mesh_name, base_name])
-			return base_name
+	# Step 2: For each base name, apply all transformations
+	for base in base_names:
+		# Prefix transformations
+		var prefix_variants := _get_prefix_variants(base)
 
-	# Fallback 4: Remove sub-component suffixes
-	# Sub-components like _Cork, _Liquid, _Handle use the parent mesh's materials
-	var component_suffixes: Array[String] = [
+		# Suffix transformations
+		var suffix_variants := _get_suffix_variants(base)
+
+		# Add prefix variants
+		for pv in prefix_variants:
+			if pv != mesh_name and not variations.has(pv):
+				variations.append(pv)
+
+		# Add suffix variants
+		for sv in suffix_variants:
+			if sv != mesh_name and not variations.has(sv):
+				variations.append(sv)
+
+		# Combine: apply prefix transforms to suffix variants
+		for sv in suffix_variants:
+			var combined := _get_prefix_variants(sv)
+			for cv in combined:
+				if cv != mesh_name and not variations.has(cv):
+					variations.append(cv)
+
+		# Combine: apply suffix transforms to prefix variants
+		for pv in prefix_variants:
+			var combined := _get_suffix_variants(pv)
+			for cv in combined:
+				if cv != mesh_name and not variations.has(cv):
+					variations.append(cv)
+
+	return variations
+
+
+## Gets prefix variants for a name (SK_ <-> SM_ swaps).
+func _get_prefix_variants(name: String) -> Array[String]:
+	var variants: Array[String] = []
+
+	# SK_ to SM_ (skeletal to static mesh)
+	if name.begins_with("SK_"):
+		variants.append("SM_" + name.substr(3))
+
+	# SM_ to SK_ (static to skeletal mesh)
+	if name.begins_with("SM_"):
+		variants.append("SK_" + name.substr(3))
+
+	return variants
+
+
+## Gets suffix variants for a name (remove common suffixes).
+func _get_suffix_variants(name: String) -> Array[String]:
+	var variants: Array[String] = []
+
+	# Suffixes to try removing
+	var suffixes_to_remove: Array[String] = [
+		"_Static", "_Preset",
 		"_Cork", "_Liquid", "_Handle",
 		"_Door_1", "_Door_2", "_Door_01", "_Door_02",
 		"_Drawer_01", "_Drawer_02", "_Drawer_03",
 		"_Chains_01", "_Chains_02",
-		"_Arrow_01", "_Arrow_02", "_Arrow_03"
+		"_Arrow_01", "_Arrow_02", "_Arrow_03",
+		"_LOD0", "_LOD1", "_LOD2", "_LOD3"
 	]
 
-	for suffix in component_suffixes:
-		if mesh_name.ends_with(suffix):
-			var base_name := mesh_name.substr(0, mesh_name.length() - suffix.length())
-			if mesh_to_materials.has(base_name):
-				print("      Fallback: '%s' -> '%s' (removed %s)" % [mesh_name, base_name, suffix])
-				return base_name
+	for suffix in suffixes_to_remove:
+		if name.ends_with(suffix):
+			var without_suffix := name.substr(0, name.length() - suffix.length())
+			if not variants.has(without_suffix):
+				variants.append(without_suffix)
 
-	# No fallback found
-	return ""
+	# Also try ADDING _Static suffix (FBX might not have it but MaterialList does)
+	if not name.ends_with("_Static"):
+		variants.append(name + "_Static")
+
+	return variants
+
+
+## Tries fuzzy matching using Levenshtein distance.
+## Finds the closest match in the material mapping within the given distance threshold.
+##
+## @param mesh_name The mesh name to find a fuzzy match for.
+## @param max_distance Maximum Levenshtein distance to consider a match.
+## @returns String The best matching name, or empty string if no match within threshold.
+func _try_fuzzy_match(mesh_name: String, max_distance: int) -> String:
+	var best_match := ""
+	var best_distance := max_distance + 1
+
+	# Compare against all keys in the mapping
+	for key in mesh_to_materials.keys():
+		# Quick length check to skip obviously different names
+		if abs(key.length() - mesh_name.length()) > max_distance:
+			continue
+
+		var distance := _levenshtein_distance(mesh_name, key)
+		if distance <= max_distance and distance < best_distance:
+			best_distance = distance
+			best_match = key
+
+			# Early exit if we find an exact or near-exact match
+			if distance <= 1:
+				break
+
+	return best_match
+
+
+## Calculates Levenshtein distance between two strings.
+## This measures the minimum number of single-character edits (insertions,
+## deletions, or substitutions) required to change one string into the other.
+##
+## @param s1 First string.
+## @param s2 Second string.
+## @returns int The Levenshtein distance.
+func _levenshtein_distance(s1: String, s2: String) -> int:
+	var len1 := s1.length()
+	var len2 := s2.length()
+
+	# Quick checks
+	if len1 == 0:
+		return len2
+	if len2 == 0:
+		return len1
+	if s1 == s2:
+		return 0
+
+	# Create distance matrix (using two rows for memory efficiency)
+	var prev_row: Array[int] = []
+	var curr_row: Array[int] = []
+
+	# Initialize first row
+	for j in range(len2 + 1):
+		prev_row.append(j)
+		curr_row.append(0)
+
+	# Fill in the rest of the matrix
+	for i in range(1, len1 + 1):
+		curr_row[0] = i
+
+		for j in range(1, len2 + 1):
+			var cost := 0 if s1[i - 1] == s2[j - 1] else 1
+
+			curr_row[j] = mini(
+				mini(
+					prev_row[j] + 1,      # Deletion
+					curr_row[j - 1] + 1   # Insertion
+				),
+				prev_row[j - 1] + cost    # Substitution
+			)
+
+		# Swap rows
+		var temp := prev_row
+		prev_row = curr_row
+		curr_row = temp
+
+	return prev_row[len2]
 
 
 ## Strips numeric suffixes like "_001", "_01", "001" from a name.
