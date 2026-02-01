@@ -292,6 +292,8 @@ grep "Color(" materials/Problem_Material.tres
 
 3. **Convert in batches**: For very large packs, split FBX files into groups and convert separately.
 
+**Note**: The Godot subprocess handling has been improved for reliability. If you previously experienced hangs or incomplete output, try updating to the latest version of the converter.
+
 ---
 
 ### FBX Import Failures

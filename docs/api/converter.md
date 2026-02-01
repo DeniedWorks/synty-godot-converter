@@ -64,6 +64,7 @@ class ConversionConfig:
     mesh_format: str = "tscn"
     filter_pattern: str | None = None
     godot_timeout: int = 600
+    high_quality_textures: bool = False
 ```
 
 #### Attributes
@@ -81,8 +82,9 @@ class ConversionConfig:
 | `skip_godot_import` | `bool` | `False` | Skip Godot import phase (only run converter script) |
 | `keep_meshes_together` | `bool` | `False` | Keep all meshes from one FBX in a single scene |
 | `mesh_format` | `str` | `"tscn"` | Output format: `"tscn"` (text) or `"res"` (binary) |
-| `filter_pattern` | `str \| None` | `None` | Only process FBX files matching this pattern |
+| `filter_pattern` | `str \| None` | `None` | Only process FBX files matching this pattern (also filters textures) |
 | `godot_timeout` | `int` | `600` | Timeout for Godot CLI operations in seconds |
+| `high_quality_textures` | `bool` | `False` | Use BPTC compression for higher quality textures |
 
 #### Example
 
@@ -249,6 +251,8 @@ def parse_args() -> ConversionConfig
 | `--skip-fbx-copy` | No | Skip copying FBX files |
 | `--skip-godot-cli` | No | Skip running Godot CLI |
 | `--godot-timeout` | No | Timeout for Godot CLI (default: 600s) |
+| `--filter` | No | Filter pattern for FBX filenames (also filters textures) |
+| `--high-quality-textures` | No | Use BPTC compression for higher quality textures |
 
 ---
 

@@ -150,8 +150,8 @@ FALLBACK_TEXTURE_PATTERNS = [
 ]
 
 # Template for .import sidecar files for textures
-# This configures VRAM compression (mode=2) with high quality
-TEXTURE_IMPORT_TEMPLATE = """[remap]
+# High quality version: BPTC compression (mode=2) with high quality - slower import, better quality
+TEXTURE_IMPORT_TEMPLATE_HIGH_QUALITY = """[remap]
 
 importer="texture"
 type="CompressedTexture2D"
@@ -170,6 +170,43 @@ dest_files=["res://.godot/imported/{filename}-{hash}.ctex"]
 
 compress/mode=2
 compress/high_quality=true
+compress/lossy_quality=0.7
+compress/hdr_compression=1
+compress/normal_map=0
+compress/channel_pack=0
+mipmaps/generate=true
+mipmaps/limit=-1
+roughness/mode=0
+roughness/src_normal=""
+process/fix_alpha_border=true
+process/premult_alpha=false
+process/normal_map_invert_y=false
+process/hdr_as_srgb=false
+process/hdr_clamp_exposure=false
+process/size_limit=0
+detect_3d/compress_to=1
+"""
+
+# Lossless version: No compression (mode=0) - faster Godot import times
+TEXTURE_IMPORT_TEMPLATE_LOSSLESS = """[remap]
+
+importer="texture"
+type="CompressedTexture2D"
+uid="uid://{uid}"
+path="res://.godot/imported/{filename}-{hash}.ctex"
+metadata={{
+"vram_texture": true
+}}
+
+[deps]
+
+source_file="{res_path}"
+dest_files=["res://.godot/imported/{filename}-{hash}.ctex"]
+
+[params]
+
+compress/mode=0
+compress/high_quality=false
 compress/lossy_quality=0.7
 compress/hdr_compression=1
 compress/normal_map=0
@@ -295,6 +332,7 @@ class ConversionConfig:
     keep_meshes_together: bool = False
     mesh_format: str = "tscn"
     filter_pattern: str | None = None
+    high_quality_textures: bool = False
 
 
 @dataclass
@@ -469,6 +507,12 @@ Examples:
         help="Filter pattern for FBX filenames (case-insensitive). "
              "Example: --filter Tree only converts FBX files containing 'Tree'",
     )
+    parser.add_argument(
+        "--high-quality-textures",
+        action="store_true",
+        help="Use BPTC compression for textures (slower import, higher quality). "
+             "Default is lossless compression for faster Godot import times.",
+    )
 
     args = parser.parse_args()
 
@@ -514,6 +558,7 @@ Examples:
         keep_meshes_together=args.keep_meshes_together,
         mesh_format=args.mesh_format,
         filter_pattern=args.filter,
+        high_quality_textures=args.high_quality_textures,
     )
 
 
@@ -703,22 +748,27 @@ def find_texture_file(
     return None
 
 
-def generate_texture_import_file(texture_path: Path) -> None:
-    """Generate a .import sidecar file for a texture with VRAM compression settings.
+def generate_texture_import_file(texture_path: Path, high_quality: bool = False) -> None:
+    """Generate a .import sidecar file for a texture with compression settings.
 
-    Creates a Godot .import file that configures the texture to use VRAM
-    compression (mode=2) with high quality settings. This prevents textures
-    from appearing yellow or incorrectly imported in Godot.
+    Creates a Godot .import file that configures the texture compression mode.
+    When high_quality is True, uses BPTC compression (mode=2) for better visual
+    quality at the cost of slower import times. When False (default), uses
+    lossless compression (mode=0) for faster Godot import times.
 
     The .import file is placed next to the texture file with the same name
     plus ".import" extension (e.g., "MyTexture.png.import").
 
     Args:
         texture_path: Absolute path to the texture file that was copied.
+        high_quality: If True, use BPTC compression (slower, higher quality).
+                     If False (default), use lossless compression (faster imports).
 
     Example:
         >>> generate_texture_import_file(Path("output/textures/Ground_01.png"))
-        # Creates: output/textures/Ground_01.png.import
+        # Creates: output/textures/Ground_01.png.import (lossless)
+        >>> generate_texture_import_file(Path("output/textures/Ground_01.png"), high_quality=True)
+        # Creates: output/textures/Ground_01.png.import (BPTC compressed)
     """
     # Calculate the res:// path for the texture
     # The texture is in textures/ subdirectory, so res://textures/filename
@@ -735,8 +785,11 @@ def generate_texture_import_file(texture_path: Path) -> None:
     uid_chars = "abcdefghijklmnopqrstuvwxyz0123456789"
     uid = "".join(random.choice(uid_chars) for _ in range(5 + random.randint(0, 8)))
 
+    # Select template based on quality setting
+    template = TEXTURE_IMPORT_TEMPLATE_HIGH_QUALITY if high_quality else TEXTURE_IMPORT_TEMPLATE_LOSSLESS
+
     # Format the template
-    import_content = TEXTURE_IMPORT_TEMPLATE.format(
+    import_content = template.format(
         uid=uid,
         filename=filename,
         hash=file_hash,
@@ -758,6 +811,7 @@ def copy_textures(
     texture_guid_to_path: dict[str, Path] | None = None,
     texture_name_to_guid: dict[str, str] | None = None,
     additional_texture_dirs: list[Path] | None = None,
+    high_quality_textures: bool = False,
 ) -> tuple[int, int, int]:
     """Copy required texture files from SourceFiles/Textures to output/textures/.
 
@@ -794,6 +848,9 @@ def copy_textures(
             Used to look up the GUID for a texture name.
         additional_texture_dirs: Optional list of additional Textures directories
             to search (for complex nested structures like Dwarven Dungeon).
+        high_quality_textures: If True, use BPTC compression for texture import
+            files (slower import, higher quality). If False (default), use
+            lossless compression for faster Godot import times.
 
     Returns:
         Tuple of (textures_copied, textures_fallback, textures_missing) where:
@@ -834,7 +891,7 @@ def copy_textures(
                 logger.debug("[DRY RUN] Would copy texture from temp: %s", texture_name)
             else:
                 shutil.copy2(temp_path, dest_path)
-                generate_texture_import_file(dest_path)
+                generate_texture_import_file(dest_path, high_quality_textures)
                 logger.debug("Copied texture from temp: %s", texture_name)
 
             copied += 1
@@ -866,7 +923,7 @@ def copy_textures(
                     )
                 else:
                     shutil.copy2(fallback_texture, dest_path)
-                    generate_texture_import_file(dest_path)
+                    generate_texture_import_file(dest_path, high_quality_textures)
                     logger.debug(
                         "Copied fallback texture: %s -> %s (for missing %s)",
                         fallback_texture.name, dest_name, texture_name
@@ -893,7 +950,7 @@ def copy_textures(
             logger.debug("[DRY RUN] Would copy texture: %s -> %s", source_path.name, dest_name)
         else:
             shutil.copy2(source_path, dest_path)
-            generate_texture_import_file(dest_path)
+            generate_texture_import_file(dest_path, high_quality_textures)
             if source_path.name != dest_name:
                 logger.debug("Copied texture: %s -> %s (renamed)", source_path.name, dest_name)
             else:
@@ -974,20 +1031,10 @@ def copy_fbx_files(
         if not fbx_dir.exists():
             logger.debug("FBX directory not found, skipping: %s", fbx_dir)
             continue
-        # Find all FBX files recursively (case-insensitive)
-        dir_files = list(fbx_dir.rglob("*.fbx")) + list(fbx_dir.rglob("*.FBX"))
+        # Note: On Windows, rglob is case-insensitive so *.fbx already matches *.FBX
+        dir_files = list(fbx_dir.rglob("*.fbx"))
         for f in dir_files:
             fbx_files.append((f, fbx_dir))
-
-    # Remove duplicates (Windows is case-insensitive)
-    seen_paths: set[Path] = set()
-    unique_fbx_files: list[tuple[Path, Path]] = []
-    for source_path, base_dir in fbx_files:
-        resolved = source_path.resolve()
-        if resolved not in seen_paths:
-            seen_paths.add(resolved)
-            unique_fbx_files.append((source_path, base_dir))
-    fbx_files = unique_fbx_files
 
     if not fbx_files:
         dirs_checked = ", ".join(str(d) for d in all_fbx_dirs if d.exists())
@@ -1249,61 +1296,25 @@ def run_godot_cli(
         logger.debug("Command: %s", " ".join(convert_cmd))
 
         try:
-            start_time = time.time()
-
-            # Use Popen to stream output in real-time for progress display
-            process = subprocess.Popen(
+            result = subprocess.run(
                 convert_cmd,
-                cwd=project_dir,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                capture_output=True,
                 text=True,
-                bufsize=1,  # Line buffered
+                timeout=timeout_seconds,
+                cwd=str(project_dir)
             )
 
-            # Read stdout lines as they come for real-time progress
-            stdout_lines: list[str] = []
-            while True:
-                # Check for timeout
-                elapsed = time.time() - start_time
-                if elapsed > timeout_seconds:
-                    process.kill()
-                    logger.error("Godot converter timed out after %ds", timeout_seconds)
-                    timeout_occurred = True
-                    break
+            if result.returncode != 0:
+                logger.error("Godot converter failed: %s", result.stderr)
+            else:
+                convert_success = True
 
-                line = process.stdout.readline()
-                if not line:
-                    # No more output, check if process finished
-                    if process.poll() is not None:
-                        break
-                    continue
-
-                line = line.rstrip()
-                stdout_lines.append(line)
-
-                # Display progress lines (format: [N/M] Processing: filename.fbx)
-                if line.startswith("[") and "] Processing:" in line:
-                    logger.info("Godot: %s", line)
+            # Log output after completion
+            for line in result.stdout.splitlines():
+                if "[" in line and "Processing:" in line:
+                    logger.info(line)
                 else:
-                    logger.debug("Godot: %s", line)
-
-            # Get any remaining stderr
-            stderr_output = process.stderr.read() if process.stderr else ""
-
-            if not timeout_occurred:
-                elapsed = time.time() - start_time
-                returncode = process.returncode
-
-                if returncode == 0:
-                    logger.debug("Godot converter completed in %.1fs", elapsed)
-                    convert_success = True
-                else:
-                    logger.error("Godot converter failed (exit code %d)", returncode)
-                    if stderr_output:
-                        logger.error("Stderr: %s", stderr_output[:1000])
-                    if stdout_lines:
-                        logger.error("Stdout (last 10 lines): %s", "\n".join(stdout_lines[-10:]))
+                    logger.debug(line)
 
         except subprocess.TimeoutExpired:
             logger.error("Godot converter timed out after %ds", timeout_seconds)
@@ -1677,6 +1688,72 @@ def build_shader_cache(
     return shader_cache, unmatched_materials
 
 
+def get_filtered_material_names(
+    prefabs: list[PrefabMaterials],
+    filter_pattern: str,
+    source_files: Path,
+) -> set[str]:
+    """Returns set of material names used by FBX files matching the filter pattern.
+
+    When a filter pattern is specified (e.g., --filter Tree), this function
+    identifies which materials are actually used by the matching FBX files,
+    allowing the texture copying step to skip textures for unused materials.
+
+    Args:
+        prefabs: List of PrefabMaterials from parse_material_list().
+        filter_pattern: Case-insensitive pattern to match against FBX filenames.
+        source_files: Path to source files directory for FBX discovery.
+
+    Returns:
+        Set of material names used by FBX files matching the filter pattern.
+    """
+    pattern_lower = filter_pattern.lower()
+    filtered_materials: set[str] = set()
+
+    for prefab in prefabs:
+        # Check if prefab name matches filter
+        if pattern_lower in prefab.name.lower():
+            for mesh in prefab.meshes:
+                for slot in mesh.slots:
+                    if slot.material_name:
+                        filtered_materials.add(slot.material_name)
+
+    logger.debug(
+        "Filter '%s' matched %d materials from prefabs",
+        filter_pattern, len(filtered_materials)
+    )
+    return filtered_materials
+
+
+def filter_textures_for_materials(
+    textures: set[str],
+    material_names: set[str],
+    mapped_materials: list[MappedMaterial],
+) -> set[str]:
+    """Returns only textures that are used by the given materials.
+
+    Cross-references the required textures with materials that are actually
+    being used (based on filter), returning only the textures needed.
+
+    Args:
+        textures: Full set of required texture names.
+        material_names: Set of material names to filter by.
+        mapped_materials: List of all mapped materials with texture references.
+
+    Returns:
+        Filtered set of texture names used by the specified materials.
+    """
+    filtered_textures: set[str] = set()
+
+    for mapped_mat in mapped_materials:
+        if mapped_mat.name in material_names:
+            for texture_name in mapped_mat.textures.values():
+                if texture_name in textures:
+                    filtered_textures.add(texture_name)
+
+    return filtered_textures
+
+
 def run_conversion(config: ConversionConfig) -> ConversionStats:
     """Execute the full conversion pipeline.
 
@@ -1899,6 +1976,21 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
         # Step 8: Copy required textures
         # Textures primarily come from .unitypackage extraction (texture_guid_to_path)
         # SourceFiles/Textures is used as optional fallback for any missing textures
+
+        # Apply smart texture filtering when filter pattern is specified
+        if config.filter_pattern and prefabs:
+            original_texture_count = len(required_textures)
+            filtered_material_names = get_filtered_material_names(
+                prefabs, config.filter_pattern, config.source_files
+            )
+            required_textures = filter_textures_for_materials(
+                required_textures, filtered_material_names, mapped_materials
+            )
+            logger.debug(
+                "Smart texture filter reduced textures from %d to %d",
+                original_texture_count, len(required_textures)
+            )
+
         logger.info("Step 8: Copying %d textures...", len(required_textures))
         # Find all Textures directories recursively for complex nested structures (optional fallback)
         texture_dirs = [config.source_files / "Textures"]
@@ -1929,6 +2021,7 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
             texture_guid_to_path=guid_map.texture_guid_to_path,
             texture_name_to_guid=texture_name_to_guid,
             additional_texture_dirs=additional_texture_dirs,
+            high_quality_textures=config.high_quality_textures,
         )
 
         # Step 9: Copy FBX files
@@ -1950,13 +2043,15 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
             output_models = pack_output_dir / "models"
 
             # Count FBX files before copying for step message
+            # Note: Only use *.fbx pattern - on Windows, rglob is case-insensitive
+            # so *.fbx already matches *.FBX, and adding both would double-count
             all_fbx_dirs = [source_fbx]
             if additional_fbx_dirs:
                 all_fbx_dirs.extend(additional_fbx_dirs)
             fbx_count = 0
             for fbx_dir in all_fbx_dirs:
                 if fbx_dir.exists():
-                    fbx_count += len(list(fbx_dir.rglob("*.fbx"))) + len(list(fbx_dir.rglob("*.FBX")))
+                    fbx_count += len(list(fbx_dir.rglob("*.fbx")))
             logger.info("Step 9: Copying %d FBX files...", fbx_count)
 
             stats.fbx_copied, stats.fbx_skipped = copy_fbx_files(

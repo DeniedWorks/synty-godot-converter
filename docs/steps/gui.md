@@ -331,6 +331,7 @@ timeout_slider = ctk.CTkSlider(
 |----------|----------|---------|----------------|
 | Skip Godot CLI | `self.skip_godot_cli_var` | False | `--skip-godot-cli` |
 | Skip Godot import | `self.skip_godot_import_var` | False | `--skip-godot-import` |
+| High quality textures | `self.high_quality_textures_var` | False | `--high-quality-textures` |
 
 ```python
 self.verbose_var = ctk.BooleanVar(value=False)

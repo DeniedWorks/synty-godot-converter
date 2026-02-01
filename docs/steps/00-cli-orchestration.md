@@ -95,7 +95,8 @@ Examples:
 | `--godot-timeout` | `int` | `600` | Timeout in seconds for each Godot CLI phase (import and convert). Each phase has this timeout applied separately. |
 | `--keep-meshes-together` | `flag` | `False` | Keep all meshes from one FBX in a single scene file. Default behavior saves each mesh as a separate .tscn file. |
 | `--mesh-format` | `choice` | `"tscn"` | Output format for mesh scenes. Options: `tscn` (text format, human-readable, diff-friendly) or `res` (binary compiled format, smaller, faster to load). |
-| `--filter` | `str` | `None` | Filter pattern for FBX filenames (case-insensitive). Only FBX files containing this pattern are processed. Example: `--filter Tree` |
+| `--filter` | `str` | `None` | Filter pattern for FBX filenames (case-insensitive). Only FBX files containing this pattern are processed. Also filters textures to only copy those needed by filtered FBX files. Example: `--filter Tree` |
+| `--high-quality-textures` | `flag` | `False` | Use BPTC compression for higher quality textures at the cost of larger file sizes. |
 
 ### Argument Validation
 
@@ -136,6 +137,7 @@ class ConversionConfig:
     keep_meshes_together: bool = False  # Single scene per FBX
     mesh_format: str = "tscn"        # Output format: "tscn" or "res"
     filter_pattern: str | None = None  # FBX filename filter
+    high_quality_textures: bool = False  # Use BPTC compression
 ```
 
 #### Field Details
@@ -154,7 +156,8 @@ class ConversionConfig:
 | `godot_timeout` | `int` | Maximum seconds for each Godot CLI phase. Import and convert phases each get this timeout. Increase for very large packs. |
 | `keep_meshes_together` | `bool` | When True, all meshes from one FBX file are saved together in a single scene. Default (False) saves each mesh as a separate scene. |
 | `mesh_format` | `str` | Output format for scenes. "tscn" is human-readable text format. "res" is binary compiled format. |
-| `filter_pattern` | `str | None` | When set, only FBX files whose names contain this pattern (case-insensitive) are processed. |
+| `filter_pattern` | `str | None` | When set, only FBX files whose names contain this pattern (case-insensitive) are processed. Also filters textures to only copy those needed by filtered FBX files. |
+| `high_quality_textures` | `bool` | When True, uses BPTC compression for higher quality textures. |
 
 ### ConversionStats
 

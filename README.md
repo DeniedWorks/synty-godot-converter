@@ -14,6 +14,8 @@ Convert Synty Studios Unity asset packs (`.unitypackage` files) to Godot 4.6 wit
 - **Recursive folder discovery** - Finds FBX files in nested pack structures automatically
 - **Project merging** - Merges `project.godot` settings for multi-pack workflows
 - **LOD inheritance** - Consistent shader detection across LOD levels
+- **Smart texture filtering** - When using `--filter`, only copies textures needed by filtered FBX files
+- **High quality texture compression** - Optional BPTC compression for improved texture quality
 
 ## Quick Start
 
@@ -61,7 +63,8 @@ This installs CustomTkinter for the graphical interface.
 | `--godot-timeout` | No | Godot CLI timeout in seconds (default: 600) |
 | `--keep-meshes-together` | No | Keep all meshes from one FBX in a single scene |
 | `--mesh-format` | No | Output format: `tscn` (default) or `res` |
-| `--filter` | No | Filter pattern for FBX filenames |
+| `--filter` | No | Filter pattern for FBX filenames (also filters textures) |
+| `--high-quality-textures` | No | Use BPTC compression for higher quality textures |
 
 ## Output Structure
 

@@ -49,10 +49,11 @@ Step 8 copies texture files that are actually referenced by the generated materi
 ### Key Responsibilities
 
 1. **Build required texture set** - Collect texture names from all mapped materials
-2. **Resolve texture sources** - Find textures in .unitypackage or SourceFiles
-3. **Copy with correct naming** - Handle Synty naming inconsistencies
-4. **Generate .import files** - Create Godot import sidecar files with VRAM compression
-5. **Handle missing textures** - Log warnings, optionally use fallback
+2. **Smart texture filtering** - When using `--filter`, only include textures needed by filtered FBX files
+3. **Resolve texture sources** - Find textures in .unitypackage or SourceFiles
+4. **Copy with correct naming** - Handle Synty naming inconsistencies
+5. **Generate .import files** - Create Godot import sidecar files with VRAM compression (or BPTC when `--high-quality-textures` is used)
+6. **Handle missing textures** - Log warnings, optionally use fallback
 
 ### Pipeline Position
 
@@ -495,8 +496,27 @@ detect_3d/compress_to=1
 |---------|-------|---------|
 | `compress/mode` | 2 | VRAM compression (GPU-optimized) |
 | `compress/high_quality` | true | Better visual quality |
+| `compress/bptc_ldr` | 0 or 1 | BPTC compression mode (1 when `--high-quality-textures` is used) |
 | `mipmaps/generate` | true | Enable mipmapping |
 | `process/fix_alpha_border` | true | Prevent alpha edge artifacts |
+
+### High Quality Texture Compression
+
+When the `--high-quality-textures` flag is enabled, the import files are generated with BPTC (BC7) compression enabled:
+
+```ini
+compress/bptc_ldr=1
+```
+
+BPTC compression provides:
+- Higher visual quality, especially for gradients and transparency
+- Better preservation of color accuracy
+- Larger compressed file sizes compared to default S3TC/DXT compression
+
+This is recommended for:
+- Hero assets that players see up close
+- Textures with subtle gradients or transparency
+- When visual fidelity is prioritized over file size
 
 ---
 
@@ -577,6 +597,22 @@ logger.info("Step 8: Copying %d textures...", len(required_textures))
 ```
 
 This can dramatically reduce the output size. A pack with 500+ textures might only need 50-100 for the specific materials being used.
+
+### 1a. Smart Texture Filtering
+
+When using the `--filter` option to convert only specific FBX files, the converter also intelligently filters textures. Instead of copying all textures referenced by all materials in the pack, it only copies textures that are actually used by the filtered FBX files.
+
+This is accomplished by:
+1. Parsing `MaterialList.txt` to identify which materials each FBX file uses
+2. Filtering the material list to only include materials used by filtered FBX files
+3. Building the required texture set from this filtered material list
+
+**Example**: Using `--filter Chest` on POLYGON Samurai Empire:
+- Full pack: 234 textures
+- With filter: 8 textures
+- Reduction: 97%
+
+This makes it practical to extract small subsets of assets from large packs without including unnecessary textures.
 
 ### 2. Prefer Package Textures
 

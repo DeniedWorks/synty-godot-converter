@@ -274,9 +274,11 @@ Copy 7 `.gdshader` files from `shaders/` to output:
 Copy only textures that are actually referenced by generated materials:
 
 1. Build set of required texture names from all materials
-2. Search `SourceFiles/Textures` for matching files
-3. Copy to `output/textures/`
-4. Log warnings for missing textures
+2. **Smart filtering**: When using `--filter`, only include textures needed by filtered FBX files (can reduce texture count by 90%+)
+3. Search `SourceFiles/Textures` for matching files
+4. Copy to `output/textures/`
+5. Generate `.import` files with VRAM compression (or BPTC when `--high-quality-textures` is used)
+6. Log warnings for missing textures
 
 ### Step 9: Copy FBX Files
 

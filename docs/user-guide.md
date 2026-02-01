@@ -193,7 +193,8 @@ For detailed GUI documentation, see [GUI Application](steps/gui.md).
 | `--godot-timeout` | 600 | Maximum seconds for Godot CLI operations. Increase for very large packs. |
 | `--keep-meshes-together` | Off | Keep all meshes from one FBX together in a single scene file. Default behavior is to save each mesh as a separate file. |
 | `--mesh-format` | `tscn` | Output format for mesh scenes: `tscn` (text, human-readable) or `res` (binary, more compact). |
-| `--filter` | None | Filter pattern for FBX filenames (case-insensitive). Only FBX files containing the pattern are processed. Example: `--filter Tree` |
+| `--filter` | None | Filter pattern for FBX filenames (case-insensitive). Only FBX files containing the pattern are processed. Also filters textures to only copy those needed by filtered FBX files. Example: `--filter Tree` |
+| `--high-quality-textures` | Off | Use BPTC compression for higher quality textures. Produces larger files but better visual quality. |
 
 ---
 
@@ -363,6 +364,23 @@ The filter is case-insensitive and matches anywhere in the FBX filename. This is
 - Testing conversion with a subset of assets
 - Converting only specific categories (trees, props, characters)
 - Faster iteration when debugging specific assets
+
+**Smart Texture Filtering**: When using `--filter`, the converter automatically identifies which textures are needed by the filtered FBX files and only copies those textures. This dramatically reduces output size when converting a subset of assets.
+
+Example: Using `--filter Chest` on POLYGON Samurai Empire reduces textures from 234 to just 8 files (97% reduction).
+
+### High Quality Textures
+
+**Use BPTC compression** for improved texture quality at the cost of larger file sizes:
+
+```bash
+python converter.py ... --high-quality-textures
+```
+
+This option enables BPTC (BC7) texture compression in Godot's import settings:
+- Higher visual quality, especially for gradients and transparency
+- Larger compressed texture files
+- Recommended for hero assets or when visual fidelity is critical
 
 ---
 

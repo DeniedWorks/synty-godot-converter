@@ -89,6 +89,8 @@ ADVANCED:
 - Skip FBX copy: Don't copy FBX files (use if already copied)
 - Skip Godot CLI: Generate materials only, no mesh conversion
 - Skip Godot import: Skip Godot's import step (manual import needed)
+- High quality textures: Use BPTC compression (slower import, better quality)
+  Default uses lossless compression for faster Godot import times.
 - Godot Timeout: How long to wait for Godot operations
 """
 
@@ -455,6 +457,19 @@ class SyntyConverterApp:
         )
         skip_import_cb.pack(side="left")
 
+        # Checkbox grid - row 3
+        checkbox_frame3 = ctk.CTkFrame(advanced_frame, fg_color="transparent")
+        checkbox_frame3.pack(anchor="center", pady=2)
+
+        self.high_quality_textures_var = ctk.BooleanVar(value=False)
+        high_quality_cb = ctk.CTkCheckBox(
+            checkbox_frame3,
+            text="High quality textures",
+            variable=self.high_quality_textures_var,
+            width=160
+        )
+        high_quality_cb.pack(side="left")
+
     def _create_log_panel(self, parent):
         """Create the log output panel."""
         log_frame = ctk.CTkFrame(parent)
@@ -724,6 +739,8 @@ class SyntyConverterApp:
                     self.skip_godot_cli_var.set(settings["skip_godot_cli"])
                 if "skip_godot_import" in settings:
                     self.skip_godot_import_var.set(settings["skip_godot_import"])
+                if "high_quality_textures" in settings:
+                    self.high_quality_textures_var.set(settings["high_quality_textures"])
 
         except (json.JSONDecodeError, OSError, KeyError):
             # Corrupted or missing settings - use defaults silently
@@ -748,6 +765,7 @@ class SyntyConverterApp:
             "skip_fbx": self.skip_fbx_var.get(),
             "skip_godot_cli": self.skip_godot_cli_var.get(),
             "skip_godot_import": self.skip_godot_import_var.get(),
+            "high_quality_textures": self.high_quality_textures_var.get(),
         }
 
         try:
@@ -811,6 +829,7 @@ class SyntyConverterApp:
             keep_meshes_together=keep_meshes_together,
             mesh_format=mesh_format,
             filter_pattern=self.filter_var.get() if self.filter_var.get() else None,
+            high_quality_textures=self.high_quality_textures_var.get(),
         )
 
         # Update UI state

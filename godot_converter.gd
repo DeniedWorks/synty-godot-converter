@@ -469,41 +469,72 @@ func save_fbx_as_single_scene(scene_root: Node, mesh_instances: Array[MeshInstan
 	# Ensure output directory exists
 	_ensure_directory_exists(output_path.get_base_dir())
 
-	# Create a new root node (Node3D) with proper ownership for all children
-	var new_root := Node3D.new()
-	new_root.name = fbx_name
+	var save_result: Error
 
-	# Duplicate children and add to new root with proper ownership
-	for child in scene_root.get_children():
-		var duplicated := child.duplicate()
-		new_root.add_child(duplicated)
-		_set_owner_recursive(duplicated, new_root)
+	if config_mesh_format == "res":
+		# For .res format: merge all meshes into a single ArrayMesh
+		var combined_mesh := ArrayMesh.new()
 
-	# Pack and save
-	var scene := PackedScene.new()
-	var pack_result := scene.pack(new_root)
+		for mesh_instance in mesh_instances:
+			var original_mesh := mesh_instance.mesh
+			if original_mesh == null:
+				continue
 
-	if pack_result != OK:
-		printerr("      ERROR: Failed to pack scene: %s (error: %s)" % [
-			output_path,
-			error_string(pack_result)
-		])
+			# Add each surface from this mesh to the combined mesh
+			for surf_idx in range(original_mesh.get_surface_count()):
+				var arrays := original_mesh.surface_get_arrays(surf_idx)
+				var blend_shapes: Array[Array] = []
+				for bs_idx in range(original_mesh.get_blend_shape_count()):
+					blend_shapes.append(original_mesh.surface_get_blend_shape_arrays(surf_idx)[bs_idx])
+
+				var primitive_type := original_mesh.surface_get_primitive_type(surf_idx)
+				combined_mesh.add_surface_from_arrays(primitive_type, arrays, blend_shapes)
+
+				# Get material (either override or from mesh)
+				var material: Material = mesh_instance.get_surface_override_material(surf_idx)
+				if material == null:
+					material = original_mesh.surface_get_material(surf_idx)
+				if material != null:
+					combined_mesh.surface_set_material(combined_mesh.get_surface_count() - 1, material)
+
+		save_result = ResourceSaver.save(combined_mesh, output_path)
+	else:
+		# For .tscn format: save as PackedScene with multiple mesh nodes
+		# Create a new root node (Node3D) with proper ownership for all children
+		var new_root := Node3D.new()
+		new_root.name = fbx_name
+
+		# Duplicate children and add to new root with proper ownership
+		for child in scene_root.get_children():
+			var duplicated := child.duplicate()
+			new_root.add_child(duplicated)
+			_set_owner_recursive(duplicated, new_root)
+
+		# Pack and save
+		var scene := PackedScene.new()
+		var pack_result := scene.pack(new_root)
+
+		if pack_result != OK:
+			printerr("      ERROR: Failed to pack scene: %s (error: %s)" % [
+				output_path,
+				error_string(pack_result)
+			])
+			new_root.free()
+			errors += 1
+			return
+
+		save_result = ResourceSaver.save(scene, output_path)
 		new_root.free()
-		errors += 1
-		return
-
-	var save_result := ResourceSaver.save(scene, output_path)
-	new_root.free()
 
 	if save_result != OK:
-		printerr("      ERROR: Failed to save scene: %s (error: %s)" % [
+		printerr("      ERROR: Failed to save: %s (error: %s)" % [
 			output_path,
 			error_string(save_result)
 		])
 		errors += 1
 		return
 
-	print("      Saved combined scene: %s (%d meshes, %d materials)" % [
+	print("      Saved combined: %s (%d meshes, %d materials)" % [
 		output_path.get_file(), mesh_instances.size(), materials_applied
 	])
 	meshes_saved += 1
@@ -582,23 +613,32 @@ func extract_and_save_mesh(mesh_instance: MeshInstance3D, relative_dir: String, 
 
 		_ensure_directory_exists(output_path.get_base_dir())
 
-		# Pack and save as scene
-		var scene := PackedScene.new()
-		var pack_result := scene.pack(scene_mesh_instance)
-		if pack_result != OK:
-			printerr("      ERROR: Failed to pack collision scene: %s" % mesh_name)
-			scene_mesh_instance.free()
-			errors += 1
-			return
+		var save_result: Error
 
-		var save_result := ResourceSaver.save(scene, output_path)
-		scene_mesh_instance.free()
+		if config_mesh_format == "res":
+			# For .res format: save just the ArrayMesh with collision material baked in
+			var mesh_to_save: ArrayMesh = original_mesh.duplicate() as ArrayMesh
+			for i in range(mesh_to_save.get_surface_count()):
+				mesh_to_save.surface_set_material(i, collision_material)
+			save_result = ResourceSaver.save(mesh_to_save, output_path)
+			scene_mesh_instance.free()
+		else:
+			# For .tscn format: save as PackedScene
+			var scene := PackedScene.new()
+			var pack_result := scene.pack(scene_mesh_instance)
+			if pack_result != OK:
+				printerr("      ERROR: Failed to pack collision scene: %s" % mesh_name)
+				scene_mesh_instance.free()
+				errors += 1
+				return
+			save_result = ResourceSaver.save(scene, output_path)
+			scene_mesh_instance.free()
 
 		if save_result == OK:
 			print("      Saved collision: %s (green wireframe)" % mesh_name)
 			meshes_saved += 1
 		else:
-			printerr("      ERROR: Failed to save collision scene: %s" % mesh_name)
+			printerr("      ERROR: Failed to save collision: %s" % mesh_name)
 			errors += 1
 		return  # Skip normal material lookup
 
@@ -644,26 +684,39 @@ func extract_and_save_mesh(mesh_instance: MeshInstance3D, relative_dir: String, 
 	var output_dir := output_path.get_base_dir()
 	_ensure_directory_exists(output_dir)
 
-	# Pack and save as scene
-	var scene := PackedScene.new()
-	var pack_result := scene.pack(scene_mesh_instance)
+	var save_result: Error
 
-	if pack_result != OK:
-		printerr("      ERROR: Failed to pack scene: %s (error: %s)" % [
-			output_path,
-			error_string(pack_result)
-		])
+	if config_mesh_format == "res":
+		# For .res format: save just the ArrayMesh with materials baked into surfaces
+		var mesh_to_save: ArrayMesh = original_mesh.duplicate() as ArrayMesh
+
+		# Apply materials directly to the mesh surfaces
+		for i in range(mesh_to_save.get_surface_count()):
+			var override_mat := scene_mesh_instance.get_surface_override_material(i)
+			if override_mat != null:
+				mesh_to_save.surface_set_material(i, override_mat)
+
+		save_result = ResourceSaver.save(mesh_to_save, output_path)
 		scene_mesh_instance.free()
-		errors += 1
-		return
+	else:
+		# For .tscn format: save as PackedScene with MeshInstance3D node
+		var scene := PackedScene.new()
+		var pack_result := scene.pack(scene_mesh_instance)
 
-	var save_result := ResourceSaver.save(scene, output_path)
+		if pack_result != OK:
+			printerr("      ERROR: Failed to pack scene: %s (error: %s)" % [
+				output_path,
+				error_string(pack_result)
+			])
+			scene_mesh_instance.free()
+			errors += 1
+			return
 
-	# Clean up the temporary node
-	scene_mesh_instance.free()
+		save_result = ResourceSaver.save(scene, output_path)
+		scene_mesh_instance.free()
 
 	if save_result != OK:
-		printerr("      ERROR: Failed to save scene: %s (error: %s)" % [
+		printerr("      ERROR: Failed to save: %s (error: %s)" % [
 			output_path,
 			error_string(save_result)
 		])
