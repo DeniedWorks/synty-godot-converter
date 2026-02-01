@@ -753,9 +753,9 @@ func extract_and_save_mesh(mesh_instance: MeshInstance3D, relative_dir: String, 
 
 
 ## Looks up material names for a mesh by name.
-## Tries exact match first, then strips numeric suffixes added by Godot import
-## (like "_001", "_002"). If still not found, tries various fallback patterns
-## for common naming conventions (SK_ to SM_, _Static suffix, etc.).
+## Tries exact match first, then various fallback patterns for common naming
+## conventions (SK_ to SM_, _Static suffix, etc.), then strips numeric suffixes
+## added by Godot import (like "_001", "_002").
 ##
 ## @param mesh_name The mesh name to look up (e.g., "SM_Prop_Crystal_01_001").
 ## @returns Array[String] Material names for each surface. May contain empty strings
@@ -766,25 +766,31 @@ func get_material_names_for_mesh(mesh_name: String) -> Array[String]:
 
 	# Try exact match first
 	if not mesh_to_materials.has(lookup_name):
-		# Try stripping numeric suffixes like "_001", "_002" (Godot import adds these)
-		var base_name := _strip_numeric_suffix(mesh_name)
-		if base_name != mesh_name and mesh_to_materials.has(base_name):
-			lookup_name = base_name
+		# Try fallback patterns BEFORE stripping numeric suffix
+		# (important: SM_Wep_Axe_01 in mapping, SK_Wep_Axe_01 in FBX)
+		var fallback_name := _try_material_fallbacks(mesh_name)
+		if not fallback_name.is_empty():
+			lookup_name = fallback_name
 		else:
-			# Try fallback patterns for common naming mismatches
-			var fallback_name := _try_material_fallbacks(base_name if base_name != mesh_name else mesh_name)
-			if not fallback_name.is_empty():
-				lookup_name = fallback_name
+			# Try stripping numeric suffixes like "_001", "_002" (Godot import adds these)
+			var base_name := _strip_numeric_suffix(mesh_name)
+			if base_name != mesh_name and mesh_to_materials.has(base_name):
+				lookup_name = base_name
 			else:
-				# Final fallback: use default material if available
-				if not default_material_name.is_empty():
-					print("      Using default material for mesh '%s': %s" % [mesh_name, default_material_name])
-					material_names_result.append(default_material_name)
-					return material_names_result
+				# Try fallbacks on stripped name too
+				fallback_name = _try_material_fallbacks(base_name) if base_name != mesh_name else ""
+				if not fallback_name.is_empty():
+					lookup_name = fallback_name
 				else:
-					print("      Warning: No material mapping for mesh '%s'" % mesh_name)
-					warnings += 1
-					return material_names_result
+					# Final fallback: use default material if available
+					if not default_material_name.is_empty():
+						print("      Using default material for mesh '%s': %s" % [mesh_name, default_material_name])
+						material_names_result.append(default_material_name)
+						return material_names_result
+					else:
+						print("      Warning: No material mapping for mesh '%s'" % mesh_name)
+						warnings += 1
+						return material_names_result
 
 	var material_names = mesh_to_materials[lookup_name]
 
