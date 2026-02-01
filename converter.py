@@ -2048,11 +2048,23 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
             all_fbx_dirs = [source_fbx]
             if additional_fbx_dirs:
                 all_fbx_dirs.extend(additional_fbx_dirs)
-            fbx_count = 0
+            all_fbx_files: list[Path] = []
             for fbx_dir in all_fbx_dirs:
                 if fbx_dir.exists():
-                    fbx_count += len(list(fbx_dir.rglob("*.fbx")))
-            logger.info("Step 9: Copying %d FBX files...", fbx_count)
+                    all_fbx_files.extend(fbx_dir.rglob("*.fbx"))
+            total_count = len(all_fbx_files)
+
+            # Apply filter to get accurate count
+            if config.filter_pattern:
+                pattern_lower = config.filter_pattern.lower()
+                filtered_files = [f for f in all_fbx_files if pattern_lower in f.stem.lower()]
+                filtered_count = len(filtered_files)
+                logger.info(
+                    "Step 9: Copying %d of %d FBX files (filter: %s)...",
+                    filtered_count, total_count, config.filter_pattern
+                )
+            else:
+                logger.info("Step 9: Copying %d FBX files...", total_count)
 
             stats.fbx_copied, stats.fbx_skipped = copy_fbx_files(
                 source_fbx,
