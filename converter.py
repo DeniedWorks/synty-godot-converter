@@ -378,6 +378,7 @@ class ConversionConfig:
     mesh_format: str = "tscn"
     filter_pattern: str | None = None
     high_quality_textures: bool = False
+    mesh_scale: float = 1.0
 
 
 @dataclass
@@ -558,8 +559,18 @@ Examples:
         help="Use BPTC compression for textures (slower import, higher quality). "
              "Default is lossless compression for faster Godot import times.",
     )
+    parser.add_argument(
+        "--mesh-scale",
+        type=float,
+        default=1.0,
+        help="Scale factor for mesh output (e.g., 100 for packs that are 100x too small)",
+    )
 
     args = parser.parse_args()
+
+    # Validate mesh_scale
+    if args.mesh_scale <= 0:
+        parser.error(f"--mesh-scale must be positive, got: {args.mesh_scale}")
 
     # Validate paths
     if not args.unity_package.exists():
@@ -604,6 +615,7 @@ Examples:
         mesh_format=args.mesh_format,
         filter_pattern=args.filter,
         high_quality_textures=args.high_quality_textures,
+        mesh_scale=args.mesh_scale,
     )
 
 
@@ -1138,6 +1150,7 @@ def generate_converter_config(
     keep_meshes_together: bool,
     mesh_format: str,
     filter_pattern: str | None,
+    mesh_scale: float,
     dry_run: bool,
 ) -> None:
     """Generate converter_config.json for Godot's godot_converter.gd script.
@@ -1152,12 +1165,14 @@ def generate_converter_config(
             in a single scene file.
         mesh_format: Output format - 'tscn' (text) or 'res' (binary).
         filter_pattern: Optional filter pattern for FBX filenames.
+        mesh_scale: Scale factor for mesh vertices.
         dry_run: If True, only log what would be written.
     """
     config = {
         "keep_meshes_together": keep_meshes_together,
         "mesh_format": mesh_format,
         "filter_pattern": filter_pattern,
+        "mesh_scale": mesh_scale,
     }
 
     config_path = project_dir / "converter_config.json"
@@ -1178,6 +1193,7 @@ def run_godot_cli(
     keep_meshes_together: bool = False,
     mesh_format: str = "tscn",
     filter_pattern: str | None = None,
+    mesh_scale: float = 1.0,
 ) -> tuple[bool, bool, bool]:
     """Run Godot CLI in two phases: import and convert.
 
@@ -1267,6 +1283,7 @@ def run_godot_cli(
         keep_meshes_together,
         mesh_format,
         filter_pattern,
+        mesh_scale,
         dry_run,
     )
 
@@ -2238,6 +2255,7 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
                 keep_meshes_together=config.keep_meshes_together,
                 mesh_format=config.mesh_format,
                 filter_pattern=config.filter_pattern,
+                mesh_scale=config.mesh_scale,
             )
 
             # Count generated mesh files

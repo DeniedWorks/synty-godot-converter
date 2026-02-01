@@ -79,6 +79,7 @@ var default_material_name: String = ""
 var config_keep_meshes_together: bool = false
 var config_mesh_format: String = "tscn"
 var config_filter_pattern: String = ""
+var config_mesh_scale: float = 1.0
 
 
 ## Loads configuration options from converter_config.json.
@@ -122,12 +123,20 @@ func load_converter_config() -> bool:
 	config_mesh_format = data.get("mesh_format", "tscn")
 	var filter_val = data.get("filter_pattern", null)
 	config_filter_pattern = filter_val if filter_val != null else ""
+	if data.has("mesh_scale"):
+		var scale_val = float(data["mesh_scale"])
+		if scale_val > 0:
+			config_mesh_scale = scale_val
+		else:
+			push_warning("Invalid mesh_scale %s, using 1.0" % scale_val)
 
 	print("Config loaded:")
 	print("  keep_meshes_together: %s" % config_keep_meshes_together)
 	print("  mesh_format: %s" % config_mesh_format)
 	if not config_filter_pattern.is_empty():
 		print("  filter_pattern: %s" % config_filter_pattern)
+	if config_mesh_scale != 1.0:
+		print("  mesh_scale: %s" % config_mesh_scale)
 
 	return true
 
@@ -424,6 +433,11 @@ func save_fbx_as_single_scene(scene_root: Node, mesh_instances: Array[MeshInstan
 		if original_mesh == null or original_mesh.get_surface_count() == 0:
 			continue
 
+		# Apply mesh scale if configured
+		if config_mesh_scale != 1.0:
+			original_mesh = scale_mesh(original_mesh, config_mesh_scale)
+			mesh_instance.mesh = original_mesh
+
 		# Check if this is a collision mesh
 		var is_collision := mesh_name.to_lower().contains("collision") or mesh_name.to_lower().ends_with("_col")
 
@@ -589,12 +603,16 @@ func extract_and_save_mesh(mesh_instance: MeshInstance3D, relative_dir: String, 
 		meshes_skipped += 1
 		return
 
+	# Apply mesh scale if configured
+	if config_mesh_scale != 1.0:
+		original_mesh = scale_mesh(original_mesh, config_mesh_scale)
+
 	# Check if this is a collision mesh - apply green wireframe material
 	var is_collision := mesh_name.to_lower().contains("collision") or mesh_name.to_lower().ends_with("_col")
 
 	# Create a MeshInstance3D node for the scene
 	var scene_mesh_instance := MeshInstance3D.new()
-	scene_mesh_instance.mesh = original_mesh  # Use original mesh (no need to duplicate)
+	scene_mesh_instance.mesh = original_mesh  # Use original mesh (or scaled copy)
 	scene_mesh_instance.name = mesh_name
 
 	# Determine base output path using current pack folder
@@ -887,6 +905,28 @@ func _detect_default_material(materials_dir: String) -> String:
 
 	dir.list_dir_end()
 	return ""
+
+
+## Scales all vertices in a mesh by a given factor.
+## Creates a new ArrayMesh with scaled vertices while preserving all other
+## surface data (normals, UVs, materials, etc.).
+##
+## @param mesh The original ArrayMesh to scale.
+## @param scale_factor The scale multiplier for vertex positions.
+## @returns ArrayMesh A new mesh with scaled vertices.
+func scale_mesh(mesh: ArrayMesh, scale_factor: float) -> ArrayMesh:
+	var scaled := ArrayMesh.new()
+	for surface_idx in mesh.get_surface_count():
+		var arrays := mesh.surface_get_arrays(surface_idx)
+		var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+		for i in verts.size():
+			verts[i] *= scale_factor
+		arrays[Mesh.ARRAY_VERTEX] = verts
+		var mat := mesh.surface_get_material(surface_idx)
+		var primitive_type: Mesh.PrimitiveType = mesh.surface_get_primitive_type(surface_idx)
+		scaled.add_surface_from_arrays(primitive_type, arrays)
+		scaled.surface_set_material(surface_idx, mat)
+	return scaled
 
 
 ## Tries to find a material file with fallback for naming mismatches.

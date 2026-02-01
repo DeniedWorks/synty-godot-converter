@@ -83,6 +83,8 @@ FILTERS:
 - Filter by Name: Only convert files containing this text
   Example: "Tree" converts only tree-related assets
   Also filters textures to only copy those needed by matching files.
+- Mesh Scale: Scale factor for mesh vertices (default 1.0)
+  Example: Use 100 for packs that are 100x too small
 
 ADVANCED:
 - Verbose: Show detailed logging
@@ -343,6 +345,63 @@ class SyntyConverterApp:
         self.mesh_mode_selector.set("Separate")  # default
         self.mesh_mode_selector.pack(anchor="center", pady=(5, 0))
 
+        # Mesh Scale selector
+        scale_frame = ctk.CTkFrame(selectors_frame, fg_color="transparent")
+        scale_frame.pack(side="left", padx=(30, 0))
+
+        # Header with info icon
+        scale_header = ctk.CTkFrame(scale_frame, fg_color="transparent")
+        scale_header.pack(anchor="center")
+
+        scale_label = ctk.CTkLabel(
+            scale_header,
+            text="Mesh Scale",
+            font=ctk.CTkFont(size=16, weight="bold")
+        )
+        scale_label.pack(side="left")
+
+        # Info icon with tooltip
+        info_label = ctk.CTkLabel(
+            scale_header,
+            text="ⓘ",
+            font=ctk.CTkFont(size=14),
+            text_color="gray"
+        )
+        info_label.pack(side="left", padx=(5, 0))
+
+        # Create tooltip functionality
+        def show_tooltip(event):
+            tooltip = ctk.CTkToplevel(self.root)
+            tooltip.wm_overrideredirect(True)
+            tooltip.wm_geometry(f"+{event.x_root + 10}+{event.y_root + 10}")
+            tooltip_label = ctk.CTkLabel(
+                tooltip,
+                text="If the models are too small, setting this to 100 usually fixes it.",
+                corner_radius=6,
+                fg_color=("gray85", "gray20"),
+                padx=10,
+                pady=5
+            )
+            tooltip_label.pack()
+            info_label.tooltip = tooltip
+
+        def hide_tooltip(event):
+            if hasattr(info_label, 'tooltip'):
+                info_label.tooltip.destroy()
+                del info_label.tooltip
+
+        info_label.bind("<Enter>", show_tooltip)
+        info_label.bind("<Leave>", hide_tooltip)
+
+        self.mesh_scale_var = ctk.StringVar(value="1.0")
+        scale_entry = ctk.CTkEntry(
+            scale_frame,
+            textvariable=self.mesh_scale_var,
+            width=80,
+            justify="center"
+        )
+        scale_entry.pack(anchor="center", pady=(5, 0))
+
     def _on_format_change(self, value: str):
         """Handle output format selection change."""
         pass  # Can add logging or other behavior if needed
@@ -356,7 +415,7 @@ class SyntyConverterApp:
         filter_frame = ctk.CTkFrame(parent, fg_color="transparent")
         filter_frame.pack(pady=(0, 15), anchor="center")
 
-        # Inner frame to hold label and entry together
+        # Inner frame to hold filter
         filter_inner = ctk.CTkFrame(filter_frame, fg_color="transparent")
         filter_inner.pack(anchor="center")
 
@@ -738,6 +797,8 @@ class SyntyConverterApp:
                     self.skip_godot_import_var.set(settings["skip_godot_import"])
                 if "high_quality_textures" in settings:
                     self.high_quality_textures_var.set(settings["high_quality_textures"])
+                if "mesh_scale" in settings:
+                    self.mesh_scale_var.set(settings["mesh_scale"])
 
         except (json.JSONDecodeError, OSError, KeyError):
             # Corrupted or missing settings - use defaults silently
@@ -763,6 +824,7 @@ class SyntyConverterApp:
             "skip_godot_cli": self.skip_godot_cli_var.get(),
             "skip_godot_import": self.skip_godot_import_var.get(),
             "high_quality_textures": self.high_quality_textures_var.get(),
+            "mesh_scale": self.mesh_scale_var.get(),
         }
 
         try:
@@ -812,6 +874,14 @@ class SyntyConverterApp:
         mesh_format = self.format_selector.get()  # "tscn" or "res"
         keep_meshes_together = self.mesh_mode_selector.get() == "Combined"
 
+        # Parse mesh scale with validation
+        try:
+            mesh_scale = float(self.mesh_scale_var.get())
+            if mesh_scale <= 0:
+                raise ValueError("Scale must be positive")
+        except ValueError:
+            mesh_scale = 1.0
+
         config = ConversionConfig(
             unity_package=Path(self.unity_package_var.get()),
             source_files=Path(self.source_files_var.get()),
@@ -827,6 +897,7 @@ class SyntyConverterApp:
             mesh_format=mesh_format,
             filter_pattern=self.filter_var.get() if self.filter_var.get() else None,
             high_quality_textures=self.high_quality_textures_var.get(),
+            mesh_scale=mesh_scale,
         )
 
         # Update UI state
