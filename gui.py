@@ -47,7 +47,7 @@ from converter import ConversionConfig, ConversionStats, run_conversion
 # --- Constants ---
 
 APP_TITLE = "SYNTY CONVERTER"
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.1"
 DEFAULT_WINDOW_SIZE = "1080x640"
 
 # Default paths
@@ -82,6 +82,7 @@ OUTPUT OPTIONS:
 FILTERS:
 - Filter by Name: Only convert files containing this text
   Example: "Tree" converts only tree-related assets
+  Also filters textures to only copy those needed by matching files.
 
 ADVANCED:
 - Verbose: Show detailed logging
