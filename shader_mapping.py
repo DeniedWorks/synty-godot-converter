@@ -401,6 +401,7 @@ TEXTURE_MAP_POLYGON: dict[str, str] = {
     "_Albedo_Map": "base_texture",
     "_BaseMap": "base_texture",
     "_MainTex": "base_texture",
+    "_Texture": "base_texture",  # CustomCharacters shader (FantasyHero, ModularHero, etc.)
     "_Normal_Map": "normal_texture",
     "_BumpMap": "normal_texture",
     "_Emission_Map": "emission_texture",
