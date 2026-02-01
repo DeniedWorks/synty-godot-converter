@@ -270,6 +270,51 @@ OceanWavesGradient={
 """
 
 
+def extract_pack_name_from_package(unity_package_path: Path) -> str:
+    """Extract clean pack name from Unity package filename.
+
+    Synty package files follow the naming convention:
+        POLYGON_PackName_Unity_YYYY_V_vX_Y_Z.unitypackage
+
+    This function extracts just the pack name portion (e.g., "POLYGON_PackName")
+    by removing the Unity version suffix.
+
+    Args:
+        unity_package_path: Path to the .unitypackage file.
+
+    Returns:
+        Clean pack name without version information.
+
+    Examples:
+        >>> extract_pack_name_from_package(Path("POLYGON_Samurai_Empire_Unity_2022_3_v1_0_1.unitypackage"))
+        'POLYGON_Samurai_Empire'
+        >>> extract_pack_name_from_package(Path("POLYGON_NatureBiomes_EnchantedForest_Unity_2022_3_v1_6_1.unitypackage"))
+        'POLYGON_NatureBiomes_EnchantedForest'
+        >>> extract_pack_name_from_package(Path("Nature.unitypackage"))
+        'Nature'
+    """
+    # Get filename without extension
+    filename = unity_package_path.stem
+
+    # Pattern to match "_Unity_YYYY_V" suffix (e.g., "_Unity_2022_3")
+    # This captures everything before the Unity version marker
+    unity_pattern = re.compile(r'^(.+?)_Unity_\d{4}_\d+.*$', re.IGNORECASE)
+    match = unity_pattern.match(filename)
+
+    if match:
+        return match.group(1)
+
+    # Fallback: try to remove common version patterns like "_vX_Y_Z" or "_v1.0"
+    version_pattern = re.compile(r'^(.+?)_v\d+[._]\d+.*$', re.IGNORECASE)
+    match = version_pattern.match(filename)
+
+    if match:
+        return match.group(1)
+
+    # No version pattern found, return filename as-is
+    return filename
+
+
 @dataclass
 class ConversionConfig:
     """Configuration dataclass for the conversion pipeline.
@@ -1251,27 +1296,50 @@ def run_godot_cli(
 
             try:
                 start_time = time.time()
-                result = subprocess.run(
+                # Use Popen for real-time output streaming
+                process = subprocess.Popen(
                     import_cmd,
-                    cwd=project_dir,
-                    capture_output=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,  # Merge stderr into stdout
                     text=True,
-                    timeout=timeout_seconds,
+                    cwd=str(project_dir),
+                    bufsize=1,  # Line buffered
                 )
-                elapsed = time.time() - start_time
 
-                if result.returncode == 0:
-                    logger.debug("Godot import completed in %.1fs", elapsed)
-                    import_success = True
-                else:
-                    logger.error("Godot import failed (exit code %d)", result.returncode)
-                    if result.stderr:
-                        logger.error("Stderr: %s", result.stderr[:1000])
+                # Read output in real-time
+                try:
+                    import_count = 0
+                    for line in process.stdout:
+                        line = line.rstrip()
+                        if line:
+                            # Godot import outputs lines like "Importing: res://..." or "file.fbx"
+                            if "Importing" in line or line.endswith(".fbx"):
+                                import_count += 1
+                                # Log every file (GUI handles single-line updating)
+                                logger.info("Importing [%d]...", import_count)
+                            else:
+                                logger.debug(line)
 
-            except subprocess.TimeoutExpired:
-                logger.error("Godot import timed out after %ds", timeout_seconds)
-                timeout_occurred = True
-                return import_success, convert_success, timeout_occurred
+                    # Log completion message
+                    if import_count > 0:
+                        logger.info("Import complete (%d files)", import_count)
+
+                    process.wait(timeout=timeout_seconds)
+                    elapsed = time.time() - start_time
+
+                    if process.returncode == 0:
+                        logger.debug("Godot import completed in %.1fs", elapsed)
+                        import_success = True
+                    else:
+                        logger.error("Godot import failed (exit code %d)", process.returncode)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    logger.error("Godot import timed out after %ds", timeout_seconds)
+                    timeout_occurred = True
+                    return import_success, convert_success, timeout_occurred
+                finally:
+                    if process.stdout:
+                        process.stdout.close()
 
             except Exception as e:
                 logger.error("Failed to run Godot import: %s", e)
@@ -1296,29 +1364,54 @@ def run_godot_cli(
         logger.debug("Command: %s", " ".join(convert_cmd))
 
         try:
-            result = subprocess.run(
+            # Use Popen for real-time output streaming
+            process = subprocess.Popen(
                 convert_cmd,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,  # Merge stderr into stdout
                 text=True,
-                timeout=timeout_seconds,
-                cwd=str(project_dir)
+                cwd=str(project_dir),
+                bufsize=1,  # Line buffered
             )
 
-            if result.returncode != 0:
-                logger.error("Godot converter failed: %s", result.stderr)
-            else:
-                convert_success = True
+            # Read output in real-time
+            try:
+                last_total = None
+                for line in process.stdout:
+                    line = line.rstrip()
+                    if line:
+                        if "[" in line and "Processing:" in line:
+                            # Extract [X/Y] from the processing line for compact display
+                            # Pattern: "[1/830] Processing: Character_Ghost_01.fbx"
+                            match = re.match(r'\[(\d+)/(\d+)\]', line)
+                            if match:
+                                current = int(match.group(1))
+                                total = int(match.group(2))
+                                last_total = total
+                                # Log every file (GUI handles single-line updating)
+                                logger.info("Processing [%d/%d]...", current, total)
+                            else:
+                                # Fallback: log the line if pattern doesn't match
+                                logger.info(line)
+                        else:
+                            logger.debug(line)
 
-            # Log output after completion
-            for line in result.stdout.splitlines():
-                if "[" in line and "Processing:" in line:
-                    logger.info(line)
+                # Log completion message
+                if last_total is not None:
+                    logger.info("Processing complete (%d meshes)", last_total)
+
+                process.wait(timeout=timeout_seconds)
+                if process.returncode == 0:
+                    convert_success = True
                 else:
-                    logger.debug(line)
-
-        except subprocess.TimeoutExpired:
-            logger.error("Godot converter timed out after %ds", timeout_seconds)
-            timeout_occurred = True
+                    logger.error("Godot converter failed (exit code %d)", process.returncode)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                logger.error("Godot converter timed out after %ds", timeout_seconds)
+                timeout_occurred = True
+            finally:
+                if process.stdout:
+                    process.stdout.close()
 
         except Exception as e:
             logger.error("Failed to run Godot converter: %s", e)
@@ -1796,9 +1889,9 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
     """
     stats = ConversionStats()
 
-    # Extract pack name from source_files parent directory
-    # e.g., C:\SyntyComplete\PolygonNature\SourceFiles -> pack_name = "PolygonNature"
-    raw_pack_name = config.source_files.parent.name
+    # Extract pack name from Unity package filename (not source_files directory)
+    # e.g., POLYGON_Samurai_Empire_Unity_2022_3_v1_0_1.unitypackage -> "POLYGON_Samurai_Empire"
+    raw_pack_name = extract_pack_name_from_package(config.unity_package)
     # Sanitize to remove invalid filesystem characters
     pack_name = sanitize_filename(raw_pack_name)
     if pack_name != raw_pack_name:
@@ -1831,7 +1924,7 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
     setup_output_directories(pack_output_dir, config.dry_run)
 
     # Step 3: Extract Unity package
-    logger.info("Step 3: Extracting Unity package...")
+    logger.info("Step 3: Extracting Unity package (%s)...", pack_name)
     try:
         guid_map: GuidMap = extract_unitypackage(config.unity_package)
         logger.debug("Extracted %d assets from Unity package", len(guid_map.guid_to_pathname))

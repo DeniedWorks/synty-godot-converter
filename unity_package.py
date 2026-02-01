@@ -127,8 +127,6 @@ def extract_unitypackage(package_path: Path) -> GuidMap:
     if not package_path.exists():
         raise FileNotFoundError(f"Unity package not found: {package_path}")
 
-    logger.info("Extracting Unity package: %s", package_path.name)
-
     with tarfile.open(package_path, "r:gz") as tar:
         # Parse the tar structure into {guid: {filename: content}}
         guid_data = _parse_tar_structure(tar)

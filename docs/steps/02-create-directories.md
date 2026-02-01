@@ -268,19 +268,27 @@ The converter uses Python's `pathlib.Path` for all path operations, not the olde
 
 ### Pack Name Extraction
 
-**Location:** `converter.py`, lines 1722-1728
+**Location:** `converter.py`, `extract_pack_name_from_package()` function
 
 ```python
-# Extract pack name from source_files parent directory
-# e.g., C:\SyntyComplete\PolygonNature\SourceFiles -> pack_name = "PolygonNature"
-raw_pack_name = config.source_files.parent.name
+# Extract pack name from Unity package filename (not source_files directory)
+# e.g., POLYGON_Samurai_Empire_Unity_2022_3_v1_0_1.unitypackage -> "POLYGON_Samurai_Empire"
+raw_pack_name = extract_pack_name_from_package(config.unity_package)
 # Sanitize to remove invalid filesystem characters
 pack_name = sanitize_filename(raw_pack_name)
 if pack_name != raw_pack_name:
     logger.warning("Pack name sanitized: '%s' -> '%s'", raw_pack_name, pack_name)
 ```
 
-The pack name is derived from the parent directory of `SourceFiles/`, then sanitized to remove any filesystem-invalid characters.
+The pack name is extracted from the Unity package filename using `extract_pack_name_from_package()`, which:
+1. Strips the `_Unity_YYYY_V_vX_Y_Z` version suffix (e.g., `_Unity_2022_3_v1_0_1`)
+2. Falls back to removing simpler version patterns like `_vX_Y_Z`
+3. Returns the filename as-is if no version pattern is found
+
+**Examples:**
+- `POLYGON_Samurai_Empire_Unity_2022_3_v1_0_1.unitypackage` -> `POLYGON_Samurai_Empire`
+- `POLYGON_NatureBiomes_EnchantedForest_Unity_2022_3_v1_6_1.unitypackage` -> `POLYGON_NatureBiomes_EnchantedForest`
+- `Nature.unitypackage` -> `Nature`
 
 ### Output Path Construction
 

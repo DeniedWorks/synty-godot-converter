@@ -138,6 +138,9 @@ class SyntyConverterApp:
         self.conversion_cancelled = threading.Event()
         self.log_queue: queue.Queue = queue.Queue()
 
+        # Track if last log line was a progress message (for single-line updating)
+        self._last_was_progress = False
+
         # Track conversion stats for display
         self.current_stats: ConversionStats | None = None
 
@@ -183,10 +186,10 @@ class SyntyConverterApp:
         # Help button
         help_btn = ctk.CTkButton(
             header_frame,
-            text="?",
-            width=35,
+            text="Info",
+            width=50,
             height=35,
-            font=ctk.CTkFont(size=16, weight="bold"),
+            font=ctk.CTkFont(size=14, weight="bold"),
             command=self._show_help
         )
         help_btn.pack(side="right", padx=15, pady=7)
@@ -455,15 +458,11 @@ class SyntyConverterApp:
             variable=self.skip_godot_import_var,
             width=140
         )
-        skip_import_cb.pack(side="left")
-
-        # Checkbox grid - row 3
-        checkbox_frame3 = ctk.CTkFrame(advanced_frame, fg_color="transparent")
-        checkbox_frame3.pack(anchor="center", pady=2)
+        skip_import_cb.pack(side="left", padx=(0, 10))
 
         self.high_quality_textures_var = ctk.BooleanVar(value=False)
         high_quality_cb = ctk.CTkCheckBox(
-            checkbox_frame3,
+            checkbox_frame2,
             text="High quality textures",
             variable=self.high_quality_textures_var,
             width=160
@@ -543,29 +542,6 @@ class SyntyConverterApp:
         )
         self.convert_btn.pack(side="left", padx=5)
 
-        self.cancel_btn = ctk.CTkButton(
-            btn_frame,
-            text="Cancel",
-            width=80,
-            height=36,
-            fg_color="gray40",
-            hover_color="gray30",
-            command=self._cancel_conversion,
-            state="disabled"
-        )
-        self.cancel_btn.pack(side="left", padx=5)
-
-        info_btn = ctk.CTkButton(
-            btn_frame,
-            text="Info",
-            width=60,
-            height=36,
-            fg_color="gray50",
-            hover_color="gray40",
-            command=self._show_help
-        )
-        info_btn.pack(side="left", padx=5)
-
     # --- Event Handlers ---
 
     def _show_help(self):
@@ -631,6 +607,7 @@ class SyntyConverterApp:
         self.log_text.configure(state="normal")
         self.log_text.delete("1.0", "end")
         self.log_text.configure(state="disabled")
+        self._last_was_progress = False
 
     def _copy_log(self):
         """Copy log contents to clipboard."""
@@ -638,13 +615,32 @@ class SyntyConverterApp:
         self.root.clipboard_append(self.log_text.get("1.0", "end"))
         self._log_message("Log copied to clipboard")
 
+    def _is_progress_message(self, message: str) -> bool:
+        """Check if a message is a progress update that should replace the last line."""
+        return message.startswith("Importing [") or message.startswith("Processing [")
+
     def _log_message(self, message: str, level: str = "INFO"):
-        """Add a message to the log display."""
+        """Add a message to the log display.
+
+        Progress messages (Importing [...] or Processing [...]) update in place
+        instead of appending new lines.
+        """
         timestamp = datetime.now().strftime("%H:%M:%S")
         formatted = f"[{timestamp}] {message}\n"
 
+        is_progress = self._is_progress_message(message)
+
         self.log_text.configure(state="normal")
-        self.log_text.insert("end", formatted, level)
+
+        # If both current and previous messages are progress, replace the last line
+        if is_progress and self._last_was_progress:
+            # Delete the last line (from "end-1c linestart" to "end-1c lineend+1c")
+            self.log_text._textbox.delete("end-2l linestart", "end-1c")
+            self.log_text.insert("end", formatted, level)
+        else:
+            self.log_text.insert("end", formatted, level)
+
+        self._last_was_progress = is_progress
         self.log_text.see("end")
         self.log_text.configure(state="disabled")
 
@@ -834,7 +830,6 @@ class SyntyConverterApp:
 
         # Update UI state
         self.convert_btn.configure(state="disabled")
-        self.cancel_btn.configure(state="normal")
         self.progress_bar.set(0)
         self.progress_bar.configure(mode="indeterminate")
         self.progress_bar.start()
@@ -879,7 +874,6 @@ class SyntyConverterApp:
         """Handle conversion completion on the main thread."""
         # Reset UI state
         self.convert_btn.configure(state="normal")
-        self.cancel_btn.configure(state="disabled")
         self.progress_bar.stop()
         self.progress_bar.configure(mode="determinate")
         self.progress_bar.set(1.0 if not error else 0)
