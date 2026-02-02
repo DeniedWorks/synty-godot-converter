@@ -47,24 +47,33 @@ output_dir/                      # User-specified output directory
     clouds.gdshader              # Volumetric clouds
     particles.gdshader           # Soft particles, fog effects
     skydome.gdshader             # Gradient sky domes
-    mesh_material_mapping.json   # Mesh-to-material assignments
   PackName/                      # Pack-specific subdirectory
     textures/                    # Copied texture files
     materials/                   # Generated .tres material files
     models/                      # Copied FBX source files
-    meshes/                      # Converted .tscn scene files
+    meshes/                      # Mesh output organized by configuration
+      tscn_separate/             # --mesh-format tscn (default)
+      tscn_combined/             # --mesh-format tscn --keep-meshes-together
+      res_separate/              # --mesh-format res
+      res_combined/              # --mesh-format res --keep-meshes-together
+    mesh_material_mapping.json   # Mesh-to-material assignments (per-pack)
 ```
+
+The mesh subfolder naming follows the pattern `{format}_{mode}/` where:
+- `format` is `tscn` (text, human-readable) or `res` (binary, compact)
+- `mode` is `separate` (one file per mesh, default) or `combined` (one file per FBX)
 
 ### Directory Purposes
 
 | Directory | Purpose | Created By | Contents |
 |-----------|---------|------------|----------|
 | `output_dir/` | Project root | `setup_output_directories()` | `project.godot`, `shaders/`, pack folders |
-| `shaders/` | Shared shader resources | `copy_shaders()` | 7 `.gdshader` files, `mesh_material_mapping.json` |
+| `shaders/` | Shared shader resources | `copy_shaders()` | 7 `.gdshader` files |
 | `textures/` | Pack texture assets | `setup_output_directories()` | PNG, TGA files with `.import` sidecars |
 | `materials/` | Generated Godot materials | `setup_output_directories()` | `.tres` ShaderMaterial resources |
 | `models/` | FBX source files | `setup_output_directories()` | FBX files (preserves subdirectory structure) |
-| `meshes/` | Final converted scenes | `setup_output_directories()` | `.tscn` scene files ready for use |
+| `meshes/` | Mesh output root | `setup_output_directories()` | Contains config-specific subfolders |
+| `meshes/{format}_{mode}/` | Final converted scenes | `godot_converter.gd` | `.tscn` or `.res` scene files ready for use |
 
 ### Key Design Decisions
 

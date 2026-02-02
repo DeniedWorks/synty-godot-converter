@@ -229,19 +229,29 @@ output/
       Environment/
       Props/
       ...
-    meshes/                  # Converted mesh .tscn files (ready to use!)
-      Characters/
-        SM_Chr_Knight_01.tscn
-      Environment/
-        SM_Env_Tree_Pine_01_LOD0.tscn
-        SM_Env_Tree_Pine_01_LOD1.tscn
-      ...
+    meshes/                  # Mesh output organized by configuration
+      tscn_separate/         # Default: --mesh-format tscn (one file per mesh)
+        Characters/
+          SM_Chr_Knight_01.tscn
+        Environment/
+          SM_Env_Tree_Pine_01_LOD0.tscn
+          SM_Env_Tree_Pine_01_LOD1.tscn
+        ...
+      tscn_combined/         # --mesh-format tscn --keep-meshes-together
+      res_separate/          # --mesh-format res (one file per mesh)
+      res_combined/          # --mesh-format res --keep-meshes-together
     mesh_material_mapping.json  # Mesh-to-material assignments (per-pack)
 ```
 
 ### Understanding the Output
 
-**meshes/** - This is what you use in your Godot project. Each .tscn file is a standalone scene with a MeshInstance3D root node and materials assigned as surface overrides. Drag these directly into your scenes.
+**meshes/{format}_{mode}/** - Mesh output is organized into subfolders based on your conversion options:
+- `tscn_separate/` - Text format, one file per mesh (default)
+- `tscn_combined/` - Text format, one file per FBX (with `--keep-meshes-together`)
+- `res_separate/` - Binary format, one file per mesh
+- `res_combined/` - Binary format, one file per FBX
+
+This allows you to try different configurations without overwriting previous output. Each .tscn/.res file is a standalone scene with a MeshInstance3D root node and materials assigned as surface overrides. Drag these directly into your scenes.
 
 **materials/** - ShaderMaterial .tres files. These are automatically assigned to meshes via external resource references.
 
@@ -250,6 +260,17 @@ output/
 **shaders/** - Contains the drop-in replacement shaders. Shaders are only copied if they don't already exist elsewhere in the project, preventing duplicates when converting multiple packs.
 
 **mesh_material_mapping.json** - Each pack has its own mapping file in its folder. This enables incremental multi-pack workflows where converting Pack B doesn't re-process Pack A.
+
+### Incremental Conversion (Existing Pack Detection)
+
+When re-running the converter on a pack that already has `materials/`, `textures/`, `models/`, and `mesh_material_mapping.json`, the converter detects this as an existing pack and skips phases 3-10 (extraction, parsing, material generation, texture/FBX copying). Only the mesh generation phase runs.
+
+This is useful for:
+- Trying different `--mesh-format` options (tscn vs res)
+- Trying different `--keep-meshes-together` settings
+- Regenerating meshes after updating Godot or the converter
+
+The GUI displays "Existing pack detected - mesh regeneration only" when this mode is active, and shows the target mesh subfolder (e.g., "Mesh output: meshes/tscn_separate/").
 
 ---
 

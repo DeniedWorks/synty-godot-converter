@@ -2,7 +2,7 @@
 
 Convert Synty Studios Unity asset packs (`.unitypackage` files) to Godot 4.6 with full shader support, automatic material conversion, and FBX mesh processing.
 
-**Version 2.2** - Multi-pack efficiency, comprehensive fallback matching, and improved workflows.
+**Version 2.3** - Mesh output subfolders by configuration, incremental pack conversion.
 
 ## Features
 
@@ -84,11 +84,19 @@ output/
     textures/                # Extracted textures
     materials/               # Generated .tres ShaderMaterials
     models/                  # Copied FBX files (clean paths, structure preserved)
-    meshes/                  # Individual mesh .tscn/.res files
+    meshes/                  # Mesh output organized by configuration
+      tscn_separate/         # --mesh-format tscn (default, one file per mesh)
+      tscn_combined/         # --mesh-format tscn --keep-meshes-together
+      res_separate/          # --mesh-format res (one file per mesh)
+      res_combined/          # --mesh-format res --keep-meshes-together
     mesh_material_mapping.json  # Per-pack mesh-to-material mappings
 ```
 
+**Mesh subfolder naming**: Output goes to `meshes/{format}_{mode}/` based on your options. This allows multiple output configurations to coexist without overwriting each other.
+
 **Multi-pack workflow**: Each pack folder is self-contained with its own `mesh_material_mapping.json`. The `conversion_log.txt` at the project root appends entries from each conversion, making it easy to track multiple pack imports.
+
+**Incremental conversion**: When re-running on a pack that already has `materials/`, `textures/`, `models/`, and `mesh_material_mapping.json`, the converter skips phases 3-10 and only regenerates meshes. This is useful for trying different mesh format/mode combinations without re-processing textures and materials.
 
 ## Pipeline Overview
 

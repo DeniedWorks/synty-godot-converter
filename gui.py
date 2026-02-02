@@ -345,6 +345,15 @@ class SyntyConverterApp:
         self.mesh_mode_selector.set("Separate")  # default
         self.mesh_mode_selector.pack(anchor="center", pady=(5, 0))
 
+        # Mesh output path label (shows computed subfolder)
+        self.mesh_output_label = ctk.CTkLabel(
+            options_frame,
+            text="Mesh output: meshes/tscn_separate/",
+            font=ctk.CTkFont(size=11),
+            text_color="gray"
+        )
+        self.mesh_output_label.pack(anchor="center", pady=(10, 0))
+
         # Mesh Scale selector
         scale_frame = ctk.CTkFrame(selectors_frame, fg_color="transparent")
         scale_frame.pack(side="left", padx=(30, 0))
@@ -404,11 +413,29 @@ class SyntyConverterApp:
 
     def _on_format_change(self, value: str):
         """Handle output format selection change."""
-        pass  # Can add logging or other behavior if needed
+        self._update_mesh_output_label()
 
     def _on_mesh_mode_change(self, value: str):
         """Handle mesh mode selection change."""
-        pass  # Can add logging or other behavior if needed
+        self._update_mesh_output_label()
+
+    def _update_mesh_output_label(self):
+        """Update the mesh output path label based on current settings."""
+        mesh_format = self.format_selector.get()  # "tscn" or "res"
+        mesh_mode = "combined" if self.mesh_mode_selector.get() == "Combined" else "separate"
+        subfolder = f"meshes/{mesh_format}_{mesh_mode}/"
+        self.mesh_output_label.configure(text=f"Mesh output: {subfolder}")
+
+    def _is_existing_pack(self, output_dir: Path, pack_name: str) -> bool:
+        """Check if a pack already exists with materials/textures/models."""
+        pack_path = output_dir / pack_name
+        if not pack_path.exists():
+            return False
+        # Check for key directories that indicate a converted pack (lowercase to match setup_output_directories)
+        has_materials = (pack_path / "materials").exists()
+        has_textures = (pack_path / "textures").exists()
+        has_models = (pack_path / "models").exists()
+        return has_materials or has_textures or has_models
 
     def _create_filter_section(self, parent):
         """Create the filter input."""
@@ -800,6 +827,9 @@ class SyntyConverterApp:
                 if "mesh_scale" in settings:
                     self.mesh_scale_var.set(settings["mesh_scale"])
 
+                # Update mesh output label after loading settings
+                self._update_mesh_output_label()
+
         except (json.JSONDecodeError, OSError, KeyError):
             # Corrupted or missing settings - use defaults silently
             pass
@@ -920,6 +950,15 @@ class SyntyConverterApp:
 
         self._log_message("=" * 40)
         self._log_message(f"Starting conversion: {config.unity_package.name}")
+
+        # Check for existing pack and show feedback
+        pack_name = config.unity_package.stem  # Get name without extension
+        if self._is_existing_pack(config.output_dir, pack_name):
+            self._log_message("Existing pack detected - mesh regeneration only", level="INFO")
+
+        # Show mesh output subfolder
+        mesh_mode = "combined" if keep_meshes_together else "separate"
+        self._log_message(f"Mesh output: meshes/{mesh_format}_{mesh_mode}/")
         self._log_message("=" * 40)
 
     def _run_conversion_thread(self, config: ConversionConfig):

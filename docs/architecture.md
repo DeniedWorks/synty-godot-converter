@@ -174,7 +174,11 @@ output/
   textures/     # Copied from SourceFiles/Textures
   materials/    # Generated .tres ShaderMaterials
   models/       # Copied FBX files (structure preserved)
-  meshes/       # Individual .tscn mesh scenes
+  meshes/       # Mesh output organized by configuration
+    tscn_separate/   # --mesh-format tscn (default)
+    tscn_combined/   # --mesh-format tscn --keep-meshes-together
+    res_separate/    # --mesh-format res
+    res_combined/    # --mesh-format res --keep-meshes-together
 ```
 
 ### Step 3: Extract Unity Package
@@ -371,18 +375,25 @@ project/
     textures/
     materials/
     meshes/
+      tscn_separate/          # Mesh subfolders by configuration
+      res_combined/           # Multiple configs can coexist
     models/
     mesh_material_mapping.json
   POLYGON_Nature/
     textures/
     materials/
     meshes/
+      tscn_separate/
     models/
     mesh_material_mapping.json
   shaders/                    # Shared across all packs
   project.godot
   conversion_log.txt          # Appends for each conversion
 ```
+
+### Existing Pack Detection
+
+When re-running on a pack that already has `materials/`, `textures/`, `models/`, and `mesh_material_mapping.json`, the converter detects this and skips phases 3-10. Only mesh generation runs, outputting to the appropriate `meshes/{format}_{mode}/` subfolder. This enables quick iteration on mesh format/mode options without re-processing textures and materials.
 
 ### Smart Shader Discovery
 

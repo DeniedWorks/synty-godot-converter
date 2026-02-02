@@ -281,6 +281,19 @@ func load_converter_config() -> bool:
 }
 ```
 
+### Mesh Output Subfolder Naming
+
+Mesh output is organized into subfolders based on the `mesh_format` and `keep_meshes_together` options:
+
+| Format | Mode | Subfolder | Description |
+|--------|------|-----------|-------------|
+| `tscn` | separate | `meshes/tscn_separate/` | Text format, one file per mesh (default) |
+| `tscn` | combined | `meshes/tscn_combined/` | Text format, one file per FBX |
+| `res` | separate | `meshes/res_separate/` | Binary format, one file per mesh |
+| `res` | combined | `meshes/res_combined/` | Binary format, one file per FBX |
+
+This allows multiple output configurations to coexist without overwriting each other. Users can try different settings and compare results side-by-side.
+
 ### Pack Targeting with config_pack_name
 
 When `pack_name` is specified in the config, the converter only processes that specific pack:
@@ -309,6 +322,21 @@ func _init() -> void:
 - Faster conversion when only one pack needs processing
 - Prevents accidental processing of other packs in the project
 - Used when Python converter specifies a target pack
+
+### Existing Pack Detection (Incremental Conversion)
+
+The Python converter detects when a pack has already been fully processed by checking for the presence of:
+- `materials/` directory
+- `textures/` directory
+- `models/` directory
+- `mesh_material_mapping.json` file
+
+When all four exist, the converter skips phases 3-10 (extraction, parsing, material generation, texture/FBX copying) and only runs the mesh generation phase. This is useful for:
+- Trying different `--mesh-format` options (tscn vs res)
+- Trying different `--keep-meshes-together` settings
+- Regenerating meshes after updating Godot or the converter
+
+The GUI displays "Existing pack detected - mesh regeneration only" when this mode is active, and shows the target mesh subfolder (e.g., "Mesh output: meshes/tscn_separate/").
 
 ---
 
@@ -1342,10 +1370,11 @@ func print_summary() -> void:
 
 ### Individual Meshes (Default)
 
-Each mesh is saved as a separate scene with a `MeshInstance3D` root:
+Each mesh is saved as a separate scene with a `MeshInstance3D` root. Output goes to `meshes/tscn_separate/` (or `meshes/res_separate/` if using `--mesh-format res`):
 
 ```
 meshes/
+  tscn_separate/               # Subfolder based on format and mode
     SM_Env_Tree_01_LOD0.tscn
     SM_Env_Tree_01_LOD1.tscn
     SM_Prop_Rock_01.tscn
@@ -1364,12 +1393,13 @@ MeshInstance3D (root)
 
 ### Combined Scenes (--keep-meshes-together)
 
-All meshes from one FBX are saved together:
+All meshes from one FBX are saved together. Output goes to `meshes/tscn_combined/` (or `meshes/res_combined/` if using `--mesh-format res`):
 
 ```
 meshes/
-    SM_Env_Tree_01.tscn     # Contains all LOD meshes
-    SM_Prop_Rock.tscn        # Contains all rock meshes
+  tscn_combined/              # Subfolder based on format and mode
+    SM_Env_Tree_01.tscn       # Contains all LOD meshes
+    SM_Prop_Rock.tscn         # Contains all rock meshes
 ```
 
 **Scene Structure:**
@@ -1542,11 +1572,12 @@ res://PolygonNature/
         Rock_Mat.tres
         PolygonNature_Mat_01_A.tres
     meshes/                              # Generated output
-        SM_Env_Tree_Pine_01_LOD0.tscn
-        SM_Env_Tree_Pine_01_LOD1.tscn
-        SM_Env_Tree_Pine_01_LOD2.tscn
-        Props/                           # Mirrors models/ structure
-            SM_Prop_Rock_01.tscn
+        tscn_separate/                   # Subfolder based on format/mode
+            SM_Env_Tree_Pine_01_LOD0.tscn
+            SM_Env_Tree_Pine_01_LOD1.tscn
+            SM_Env_Tree_Pine_01_LOD2.tscn
+            Props/                       # Mirrors models/ structure
+                SM_Prop_Rock_01.tscn
 ```
 
 ---

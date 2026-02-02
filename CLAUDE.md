@@ -41,7 +41,9 @@ synty-converter/
 ## Key Architecture
 
 - **Per-pack isolation**: Each pack gets its own folder with materials/, textures/, models/, meshes/
+- **Mesh subfolders by config**: Mesh output goes to `meshes/{format}_{mode}/` subfolders (e.g., `meshes/tscn_separate/`, `meshes/res_combined/`)
 - **Per-pack mapping**: `mesh_material_mapping.json` is in each pack folder (not shared)
+- **Existing pack detection**: Re-running on a pack with materials/, textures/, models/, and mesh_material_mapping.json skips phases 3-10, only regenerates meshes
 - **Dynamic shader discovery**: Searches project for existing shaders before copying
 - **FBX path cleaning**: Strips SourceFiles/FBX/Models prefixes from paths
 
@@ -55,5 +57,5 @@ Test output location: `C:\temp\converter_test\`
 
 ---
 
-Last Updated: 2026-02-01
-Version: 2.2
+Last Updated: 2026-02-02
+Version: 2.3

@@ -268,7 +268,7 @@ func process_pack_folder(pack_folder: String) -> void:
 		print("  No default material found (no *_Mat_01_A.tres files)")
 
 	var models_path := pack_folder + "/models"
-	var meshes_output := pack_folder + "/meshes"
+	var meshes_output := pack_folder + "/meshes/" + _get_mesh_subfolder()
 
 	# Ensure output directory exists
 	_ensure_directory_exists(meshes_output)
@@ -491,7 +491,7 @@ func save_fbx_as_single_scene(scene_root: Node, mesh_instances: Array[MeshInstan
 				materials_applied += 1
 
 	# Determine output path
-	var meshes_dir := current_pack_folder + "/meshes"
+	var meshes_dir := current_pack_folder + "/meshes/" + _get_mesh_subfolder()
 	var output_path: String
 	var file_ext := "." + config_mesh_format
 
@@ -636,7 +636,7 @@ func extract_and_save_mesh(mesh_instance: MeshInstance3D, relative_dir: String, 
 	scene_mesh_instance.name = mesh_name
 
 	# Determine base output path using current pack folder
-	var meshes_dir := current_pack_folder + "/meshes"
+	var meshes_dir := current_pack_folder + "/meshes/" + _get_mesh_subfolder()
 	var file_ext := "." + config_mesh_format
 	var output_path: String
 	if relative_dir.is_empty():
@@ -1218,6 +1218,16 @@ func _count_keyword_matches(filename: String, keywords: Array) -> int:
 		if keyword in lower_name:
 			score += weight
 	return score
+
+
+## Returns the mesh output subfolder name based on current config.
+## Format: {mesh_format}_{mode} where mode is "combined" or "separate".
+## Examples: "tscn_separate", "tscn_combined", "res_separate", "res_combined"
+##
+## @returns String The subfolder name for mesh output.
+func _get_mesh_subfolder() -> String:
+	var mode := "combined" if config_keep_meshes_together else "separate"
+	return "%s_%s" % [config_mesh_format, mode]
 
 
 ## Ensures a directory exists, creating it recursively if necessary.
