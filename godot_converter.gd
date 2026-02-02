@@ -1127,8 +1127,97 @@ func find_material_path(mat_name: String, materials_dir: String) -> String:
 		if ResourceLoader.exists(with_suffix_path):
 			return with_suffix_path
 
-	# 5. Not found
+	# 5. Try keyword matching (handles cases like Crystal_Mat_01 -> Synty_Crystal)
+	var keywords := _extract_material_keywords(mat_name)
+	if keywords.size() > 0:
+		var best_match := _find_best_keyword_match(materials_dir, keywords)
+		if best_match != "":
+			return best_match
+
+	# 6. Not found
 	return ""
+
+
+## Extracts keywords from a material name for fuzzy matching.
+## Splits on underscores and camelCase, returns weighted keywords.
+## Words >3 chars are meaningful (crystal, water, leaf) and get weight 10.
+## Words <=3 chars are often generic (mat, 01, a) and get weight 1.
+## Example: "Crystal_Mat_01" -> [["crystal", 10], ["mat", 1], ["01", 1]]
+## Example: "WaterScrolling_01" -> [["water", 10], ["scrolling", 10], ["01", 1]]
+##
+## @param name The material name to extract keywords from.
+## @returns Array of [keyword, weight] pairs.
+func _extract_material_keywords(name: String) -> Array:
+	# First replace underscores with spaces
+	var spaced := name.replace("_", " ")
+
+	# Split camelCase: insert space before each uppercase letter
+	var with_camel_split := ""
+	for i in range(spaced.length()):
+		var c := spaced[i]
+		# Insert space before uppercase if not at start and previous wasn't space
+		if i > 0 and c >= "A" and c <= "Z" and spaced[i - 1] != " ":
+			with_camel_split += " "
+		with_camel_split += c
+
+	var parts := with_camel_split.split(" ", false)
+	var keywords: Array = []
+	for part in parts:
+		var lower := part.to_lower()
+		if lower.length() > 0:
+			# Words >3 chars are meaningful, <=3 chars are often generic
+			var weight := 10 if lower.length() > 3 else 1
+			keywords.append([lower, weight])
+	return keywords
+
+
+## Finds the best matching material file based on weighted keyword overlap.
+## Scans all .tres files in the directory and scores them by keyword matches.
+## Meaningful keywords (crystal, water) score higher than generic ones (mat, 01).
+##
+## @param materials_dir Path to the materials directory.
+## @param keywords Array of [keyword, weight] pairs to match against.
+## @returns String Path to best matching material, or empty string if none found.
+func _find_best_keyword_match(materials_dir: String, keywords: Array) -> String:
+	var dir := DirAccess.open(materials_dir)
+	if not dir:
+		return ""
+
+	var best_match := ""
+	var best_score := 0
+
+	dir.list_dir_begin()
+	var file_name := dir.get_next()
+	while file_name != "":
+		if file_name.ends_with(".tres"):
+			var score := _count_keyword_matches(file_name, keywords)
+			if score > best_score:
+				best_score = score
+				best_match = file_name
+		file_name = dir.get_next()
+	dir.list_dir_end()
+
+	# Require meaningful match (at least one non-generic keyword, i.e., score >= 10)
+	if best_score >= 10 and best_match != "":
+		return materials_dir.path_join(best_match)
+	return ""
+
+
+## Counts weighted keyword matches in a filename.
+## Returns sum of weights for all matching keywords.
+##
+## @param filename The filename to check (e.g., "Synty_Crystal.tres").
+## @param keywords Array of [keyword, weight] pairs.
+## @returns int Weighted score of matching keywords.
+func _count_keyword_matches(filename: String, keywords: Array) -> int:
+	var score := 0
+	var lower_name := filename.to_lower()
+	for kw_pair in keywords:
+		var keyword: String = kw_pair[0]
+		var weight: int = kw_pair[1]
+		if keyword in lower_name:
+			score += weight
+	return score
 
 
 ## Ensures a directory exists, creating it recursively if necessary.

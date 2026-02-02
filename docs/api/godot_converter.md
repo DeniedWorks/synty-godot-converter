@@ -16,6 +16,7 @@ The `godot_converter.gd` script extracts individual meshes from FBX files and sa
 - Handles duplicate mesh names across FBX files
 - Supports FBX filename filtering for selective conversion
 - Material path fallbacks (Polygon prefix stripping, component suffixes)
+- Keyword-based fallback matching for mismatched material names
 - Default material detection for packs
 
 **Script Location:** `godot_converter.gd`
@@ -540,6 +541,68 @@ Tries to find a material file with fallback for naming mismatches.
 2. Strip `Polygon*_Mat_` prefix (e.g., `PolygonFantasyKingdom_Mat_Glass` -> `Glass`)
 3. Strip `Polygon*_` prefix (e.g., `PolygonNature_Tree` -> `Tree`)
 4. Try with `_01` suffix if not already present
+5. Keyword-based matching (see `_find_material_by_keywords()`)
+
+---
+
+### _extract_keywords(name: String) -> Array[Dictionary]
+
+Extracts weighted keywords from a material name for fuzzy matching.
+
+**Arguments:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `name` | `String` | Material name to extract keywords from |
+
+**Returns:** `Array[Dictionary]` - Array of keyword dictionaries with `word` and `weight` keys
+
+**Behavior:**
+- Splits name on underscores AND camelCase boundaries (e.g., `WaterScrolling_01` -> ["water", "scrolling", "01"])
+- Assigns weights based on word length: words >3 chars = 10 points, <=3 chars = 1 point
+- Converts all keywords to lowercase for case-insensitive matching
+
+**Examples:**
+```gdscript
+_extract_keywords("Crystal_Mat_01")
+# Returns: [{"word": "crystal", "weight": 10}, {"word": "mat", "weight": 1}, {"word": "01", "weight": 1}]
+
+_extract_keywords("WaterScrolling_01")
+# Returns: [{"word": "water", "weight": 10}, {"word": "scrolling", "weight": 10}, {"word": "01", "weight": 1}]
+```
+
+---
+
+### _find_material_by_keywords(mat_name: String, materials_dir: String) -> String
+
+Attempts to find a material file using keyword-based matching when exact lookups fail.
+
+**Arguments:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `mat_name` | `String` | The material name to search for |
+| `materials_dir` | `String` | Path to the materials directory to search in |
+
+**Returns:** `String` - Full path to the best matching material file, or empty string if no match meets threshold
+
+**Behavior:**
+1. Extracts weighted keywords from the input material name
+2. Scans all `.tres` files in the materials directory
+3. For each file, extracts keywords and calculates a match score
+4. Score = sum of weights for keywords that appear in the candidate filename
+5. Returns the highest-scoring match if score >= 10 (ensures at least one meaningful keyword match)
+
+**Examples:**
+```gdscript
+# Input: "Crystal_Mat_01" with keywords ["crystal"(10), "mat"(1), "01"(1)]
+# Candidate: "Synty_Crystal.tres" contains "crystal" -> score 10
+# Result: Returns "res://materials/Synty_Crystal.tres"
+
+# Input: "WaterScrolling_01" with keywords ["water"(10), "scrolling"(10), "01"(1)]
+# Candidate: "Water_Enchanted_Scrolling.tres" contains "water" and "scrolling" -> score 20
+# Result: Returns "res://materials/Water_Enchanted_Scrolling.tres"
+```
 
 ---
 

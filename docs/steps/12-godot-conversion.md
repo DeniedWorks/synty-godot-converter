@@ -1032,6 +1032,27 @@ func find_material_path(mat_name: String, materials_dir: String) -> String:
 2. Strip `Polygon*_Mat_` prefix (e.g., `PolygonFantasyKingdom_Mat_Glass` -> `Glass.tres`)
 3. Strip `Polygon*_` prefix (e.g., `PolygonNature_Tree` -> `Tree.tres`)
 4. Add `_01` suffix if not present (e.g., `Glass` -> `Glass_01.tres`)
+5. Keyword-based matching - extracts meaningful words from the material name and finds the best matching `.tres` file
+
+**Keyword Matching (Step 5):**
+
+When all exact and prefix-based lookups fail, the converter attempts keyword-based fuzzy matching:
+
+1. **Extract keywords**: Splits the material name on underscores AND camelCase boundaries
+   - Example: `WaterScrolling_01` -> ["water", "scrolling", "01"]
+2. **Assign weights**: Words >3 characters = 10 points, <=3 characters = 1 point
+3. **Scan materials**: Checks all `.tres` files in the materials directory
+4. **Score candidates**: Each file scores points for keywords it contains
+5. **Accept match**: Returns the best match if score >= 10 (at least one meaningful keyword)
+
+**Keyword Matching Examples:**
+```
+Crystal_Mat_01 -> keywords: ["crystal"(10), "mat"(1), "01"(1)]
+  Matches: Synty_Crystal.tres (contains "crystal", score 10)
+
+WaterScrolling_01 -> keywords: ["water"(10), "scrolling"(10), "01"(1)]
+  Matches: Water_Enchanted_Scrolling.tres (contains "water" + "scrolling", score 20)
+```
 
 **Important Note:** Uses `ResourceLoader.exists()` instead of `FileAccess.file_exists()` because `FileAccess` has known issues with `res://` paths during headless execution and with `.remap` files created by Godot's import system.
 

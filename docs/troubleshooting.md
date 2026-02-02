@@ -253,6 +253,7 @@ This location is outside any pack-specific folders and less likely to have acces
 2. **Fallback 1**: Try to match mesh name to material name with common variations
 3. **Fallback 2**: Search for materials with similar names (fuzzy matching)
 4. **Fallback 3**: If mesh contains material hints (e.g., "Stone" in name), try matching
+5. **Fallback 4**: Keyword-based matching - splits material name into weighted keywords (words >3 chars = 10 pts, <=3 chars = 1 pt), scans all `.tres` files, and returns the best match if score >= 10 (e.g., `Crystal_Mat_01` matches `Synty_Crystal.tres` via the "crystal" keyword)
 
 **Solution**:
 1. Check `conversion_log.txt` for the specific mesh names
