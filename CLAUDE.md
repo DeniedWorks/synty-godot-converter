@@ -46,6 +46,8 @@ synty-converter/
 - **Existing pack detection**: Re-running on a pack with materials/, textures/, models/, and mesh_material_mapping.json skips phases 3-10, only regenerates meshes
 - **Dynamic shader discovery**: Searches project for existing shaders before copying
 - **FBX path cleaning**: Strips SourceFiles/FBX/Models prefixes from paths
+- **Output subfolder**: Optional subfolder within output directory for organizing multiple packs (e.g., `output/synty/PackName/`)
+- **Retain subfolders**: Preserves original directory structure from source files when enabled
 
 ## Testing
 
@@ -58,4 +60,4 @@ Test output location: `C:\temp\converter_test\`
 ---
 
 Last Updated: 2026-02-02
-Version: 2.3
+Version: 2.4

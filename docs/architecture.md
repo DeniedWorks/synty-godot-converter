@@ -174,11 +174,11 @@ output/
   textures/     # Copied from SourceFiles/Textures
   materials/    # Generated .tres ShaderMaterials
   models/       # Copied FBX files (structure preserved)
-  meshes/       # Mesh output organized by configuration
-    tscn_separate/   # --mesh-format tscn (default)
-    tscn_combined/   # --mesh-format tscn --keep-meshes-together
-    res_separate/    # --mesh-format res
-    res_combined/    # --mesh-format res --keep-meshes-together
+  meshes/       # Mesh output (subfolders created by Step 12 based on config)
+                 # tscn_separate/   (--mesh-format tscn, default)
+                 # tscn_combined/   (--mesh-format tscn --keep-meshes-together)
+                 # res_separate/    (--mesh-format res)
+                 # res_combined/    (--mesh-format res --keep-meshes-together)
 ```
 
 ### Step 3: Extract Unity Package
@@ -348,6 +348,7 @@ godot --headless --script res://godot_converter.gd --path <project_dir>
 - Reads `converter_config.json` for runtime options:
   - `pack_name`: Specific pack folder to process (enables incremental conversion)
   - `mesh_format`: Output format (tscn or res)
+  - `keep_meshes_together`: Whether to combine meshes per FBX into single scene
   - `filter_pattern`: FBX filename filter
   - `mesh_scale`: Scale factor for mesh vertices (e.g., 100 for undersized packs)
   - `keep_meshes_together`: Whether to combine meshes per FBX

@@ -103,7 +103,7 @@ The application creates a single main window with the following properties:
 
 ```python
 APP_TITLE = "SYNTY CONVERTER"
-APP_VERSION = "1.0.0"
+APP_VERSION = "2.4"
 DEFAULT_WINDOW_SIZE = "1080x640"
 ```
 
@@ -164,7 +164,7 @@ self.root.grid_rowconfigure(1, weight=1)     # Row 1 expands vertically
 |--------|------|------------|---------|
 | `header_frame` | `CTkFrame` | height=50, grid_propagate=False | Container with fixed height |
 | `title_label` | `CTkLabel` | font=(size=20, weight="bold") | Displays "SYNTY CONVERTER" |
-| `help_btn` | `CTkButton` | width=35, height=35, text="?" | Opens help popup |
+| `help_btn` | `CTkButton` | width=35, height=35, text="Info" | Opens help popup |
 
 ```python
 header_frame = ctk.CTkFrame(self.root, height=50)
@@ -180,7 +180,7 @@ title_label.pack(side="left", padx=15, pady=10)
 
 help_btn = ctk.CTkButton(
     header_frame,
-    text="?",
+    text="Info",
     width=35,
     height=35,
     font=ctk.CTkFont(size=16, weight="bold"),
@@ -202,10 +202,10 @@ help_btn.pack(side="right", padx=15, pady=7)
 | Unity Package | `self.unity_package_var` | (empty) | `--unity-package` |
 | Source Files | `self.source_files_var` | (empty) | `--source-files` |
 | Output Directory | `self.output_dir_var` | `C:\Godot\Projects\converted-assets` | `--output` |
-| Godot Executable | `self.godot_exe_var` | `C:\Godot\Godot_v4.6-stable_mono_win64\Godot_v4.6-stable_mono_win64.exe` | `--godot` |
 | Output Subfolder | `self.output_subfolder_var` | (empty) | `--output-subfolder` |
+| Godot Executable | `self.godot_exe_var` | `C:\Godot\Godot_v4.6-stable_mono_win64\Godot_v4.6-stable_mono_win64.exe` | `--godot` |
 
-**Note:** The Output Subfolder field appears below the Godot Executable field in the paths section.
+**Note:** The Output Subfolder field appears before the Godot Executable field in the paths section.
 
 **Layout:** 3-column grid with label, entry, and browse button.
 
@@ -331,22 +331,22 @@ timeout_slider = ctk.CTkSlider(
 
 **Checkbox Options (Row 1):**
 
-| Checkbox | Variable | Default | CLI Equivalent |
-|----------|----------|---------|----------------|
-| Verbose | `self.verbose_var` | False | `--verbose` |
-| Dry Run | `self.dry_run_var` | False | `--dry-run` |
-| Skip FBX Copy | `self.skip_fbx_var` | False | `--skip-fbx-copy` |
-| Retain Subfolders | `self.retain_subfolders_var` | False | `--retain-subfolders` |
+| Checkbox | Variable | Default | Width | CLI Equivalent |
+|----------|----------|---------|-------|----------------|
+| Retain Subfolders | `self.retain_subfolders_var` | False | 125 | `--retain-subfolders` |
+| Verbose | `self.verbose_var` | False | 75 | `--verbose` |
+| Dry Run | `self.dry_run_var` | False | 80 | `--dry-run` |
+| Skip FBX Copy | `self.skip_fbx_var` | False | 105 | `--skip-fbx-copy` |
 
 **Checkbox Options (Row 2):**
 
-| Checkbox | Variable | Default | CLI Equivalent |
-|----------|----------|---------|----------------|
-| Skip Godot CLI | `self.skip_godot_cli_var` | False | `--skip-godot-cli` |
-| Skip Godot import | `self.skip_godot_import_var` | False | `--skip-godot-import` |
-| HQ textures | `self.high_quality_textures_var` | False | `--high-quality-textures` |
+| Checkbox | Variable | Default | Width | CLI Equivalent |
+|----------|----------|---------|-------|----------------|
+| Skip Godot CLI | `self.skip_godot_cli_var` | False | 110 | `--skip-godot-cli` |
+| Skip Godot Import | `self.skip_godot_import_var` | False | 125 | `--skip-godot-import` |
+| HQ Textures | `self.high_quality_textures_var` | False | 100 | `--high-quality-textures` |
 
-**Note:** All checkboxes in row 1 use equal width (105) and padding (5px) for consistent layout. "High quality textures" is displayed as "HQ textures" to fit within the column width.
+**Note:** Each checkbox uses a specific width to accommodate its label text, with 10px padding between checkboxes. "High quality textures" is displayed as "HQ Textures" to fit within the column width.
 
 ```python
 self.verbose_var = ctk.BooleanVar(value=False)
@@ -354,7 +354,7 @@ verbose_cb = ctk.CTkCheckBox(
     checkbox_frame1,
     text="Verbose",
     variable=self.verbose_var,
-    width=105
+    width=75
 )
 ```
 

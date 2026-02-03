@@ -2,7 +2,7 @@
 
 Convert Synty Studios Unity asset packs (`.unitypackage` files) to Godot 4.6 with full shader support, automatic material conversion, and FBX mesh processing.
 
-**Version 2.3** - Mesh output subfolders by configuration, incremental pack conversion.
+**Version 2.4** - Output subfolder organization, retain source directory structure.
 
 ## Features
 
@@ -22,6 +22,8 @@ Convert Synty Studios Unity asset packs (`.unitypackage` files) to Godot 4.6 wit
 - **Dynamic shader discovery** - Finds existing shaders in your project before copying duplicates
 - **Clean FBX paths** - Strips `SourceFiles/FBX/Models` prefixes for cleaner output structure
 - **Comprehensive fallback matching** - Name variations, prefix swaps, and fuzzy matching (Levenshtein) for materials
+- **Output subfolder organization** - Organize converted packs into custom subfolders with `--output-subfolder`
+- **Retain source structure** - Preserve `Source_Files/FBX/` subdirectory structure in mesh output with `--retain-subfolders`
 
 ## Quick Start
 
@@ -72,6 +74,8 @@ This installs CustomTkinter for the graphical interface.
 | `--filter` | No | Filter pattern for FBX filenames (also filters textures and materials) |
 | `--high-quality-textures` | No | Use BPTC compression for higher quality textures |
 | `--mesh-scale` | No | Scale factor for mesh output (e.g., `100` for undersized packs) |
+| `--output-subfolder` | No | Subfolder path prepended to pack folder names |
+| `--retain-subfolders` | No | Preserve Source_Files/FBX/ subdirectory structure in mesh output |
 
 ## Output Structure
 

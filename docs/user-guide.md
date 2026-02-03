@@ -159,10 +159,20 @@ python gui.py
 - **Progress indication** with status updates
 - **Help popup** with documentation
 
+### GUI Field Layout
+
+The GUI displays input fields in the following order from top to bottom:
+
+1. **Unity Package** - Path to the .unitypackage file (with Browse button)
+2. **Source Files** - Path to the SourceFiles folder (with Browse button)
+3. **Output Directory** - Base output directory for converted assets (with Browse button)
+4. **Output Subfolder** - Optional subfolder path prepended to pack folder names (text input with "Optional" placeholder). Creates packs at `output/subfolder/POLYGON_PackName/` instead of `output/POLYGON_PackName/`
+5. **Godot Executable** - Path to the Godot 4.6 executable (with Browse button)
+
 ### Settings Persistence
 
 The GUI automatically saves your settings to `%APPDATA%\SyntyConverter\settings.json`:
-- All path fields (Unity package, source files, output, Godot executable)
+- All path fields (Unity package, source files, output, output subfolder, Godot executable)
 - All options (output format, mesh mode, filter, timeout, checkboxes)
 - Settings are restored when you reopen the application
 
