@@ -286,6 +286,24 @@ class SyntyConverterApp:
         )
         out_browse.grid(row=row, column=2, pady=4)
 
+        # Output Subfolder (optional path prefix for packs)
+        row += 1
+        subfolder_label = ctk.CTkLabel(paths_frame, text="Output Subfolder:", anchor="w", width=120)
+        subfolder_label.grid(row=row, column=0, sticky="w", pady=4)
+
+        self.subfolder_entry = ctk.CTkEntry(
+            paths_frame,
+            placeholder_text='Optional',
+            placeholder_text_color='gray'
+        )
+        self.subfolder_entry.grid(row=row, column=1, sticky="ew", padx=5, pady=4)
+
+        subfolder_browse = ctk.CTkButton(
+            paths_frame, text="...", width=35,
+            command=self._browse_subfolder
+        )
+        subfolder_browse.grid(row=row, column=2, pady=4)
+
         # Godot executable
         row += 1
         godot_label = ctk.CTkLabel(paths_frame, text="Godot Executable:", anchor="w", width=120)
@@ -304,25 +322,6 @@ class SyntyConverterApp:
             )
         )
         godot_browse.grid(row=row, column=2, pady=4)
-
-        # Output Subfolder (optional path prefix for packs)
-        row += 1
-        subfolder_label = ctk.CTkLabel(paths_frame, text="Output Subfolder:", anchor="w", width=120)
-        subfolder_label.grid(row=row, column=0, sticky="w", pady=4)
-
-        self.output_subfolder_var = ctk.StringVar()
-        subfolder_entry = ctk.CTkEntry(
-            paths_frame,
-            textvariable=self.output_subfolder_var,
-            placeholder_text='e.g., synty/'
-        )
-        subfolder_entry.grid(row=row, column=1, sticky="ew", padx=5, pady=4)
-
-        subfolder_browse = ctk.CTkButton(
-            paths_frame, text="...", width=35,
-            command=self._browse_subfolder
-        )
-        subfolder_browse.grid(row=row, column=2, pady=4)
 
     def _create_output_options(self, parent):
         """Create the output format and mesh mode segmented buttons."""
@@ -525,23 +524,32 @@ class SyntyConverterApp:
         checkbox_frame1 = ctk.CTkFrame(advanced_frame, fg_color="transparent")
         checkbox_frame1.pack(anchor="center", pady=2)
 
+        self.retain_subfolders_var = ctk.BooleanVar(value=False)
+        retain_subfolders_cb = ctk.CTkCheckBox(
+            checkbox_frame1,
+            text="Retain Subfolders",
+            variable=self.retain_subfolders_var,
+            width=125
+        )
+        retain_subfolders_cb.pack(side="left", padx=10)
+
         self.verbose_var = ctk.BooleanVar(value=False)
         verbose_cb = ctk.CTkCheckBox(
             checkbox_frame1,
             text="Verbose",
             variable=self.verbose_var,
-            width=105
+            width=75
         )
-        verbose_cb.pack(side="left", padx=5)
+        verbose_cb.pack(side="left", padx=10)
 
         self.dry_run_var = ctk.BooleanVar(value=False)
         dry_run_cb = ctk.CTkCheckBox(
             checkbox_frame1,
             text="Dry Run",
             variable=self.dry_run_var,
-            width=105
+            width=80
         )
-        dry_run_cb.pack(side="left", padx=5)
+        dry_run_cb.pack(side="left", padx=10)
 
         self.skip_fbx_var = ctk.BooleanVar(value=False)
         skip_fbx_cb = ctk.CTkCheckBox(
@@ -550,16 +558,7 @@ class SyntyConverterApp:
             variable=self.skip_fbx_var,
             width=105
         )
-        skip_fbx_cb.pack(side="left", padx=5)
-
-        self.retain_subfolders_var = ctk.BooleanVar(value=False)
-        retain_subfolders_cb = ctk.CTkCheckBox(
-            checkbox_frame1,
-            text="Retain Subfolders",
-            variable=self.retain_subfolders_var,
-            width=120
-        )
-        retain_subfolders_cb.pack(side="left", padx=5)
+        skip_fbx_cb.pack(side="left", padx=10)
 
         # Checkbox grid - row 2
         checkbox_frame2 = ctk.CTkFrame(advanced_frame, fg_color="transparent")
@@ -570,27 +569,27 @@ class SyntyConverterApp:
             checkbox_frame2,
             text="Skip Godot CLI",
             variable=self.skip_godot_cli_var,
-            width=115
+            width=110
         )
-        skip_cli_cb.pack(side="left", padx=(0, 5))
+        skip_cli_cb.pack(side="left", padx=10)
 
         self.skip_godot_import_var = ctk.BooleanVar(value=False)
         skip_import_cb = ctk.CTkCheckBox(
             checkbox_frame2,
             text="Skip Godot Import",
             variable=self.skip_godot_import_var,
-            width=130
+            width=125
         )
-        skip_import_cb.pack(side="left", padx=(0, 5))
+        skip_import_cb.pack(side="left", padx=10)
 
         self.high_quality_textures_var = ctk.BooleanVar(value=False)
         high_quality_cb = ctk.CTkCheckBox(
             checkbox_frame2,
             text="HQ Textures",
             variable=self.high_quality_textures_var,
-            width=110
+            width=100
         )
-        high_quality_cb.pack(side="left")
+        high_quality_cb.pack(side="left", padx=10)
 
     def _create_log_panel(self, parent):
         """Create the log output panel."""
@@ -732,13 +731,16 @@ class SyntyConverterApp:
             # Try to compute relative path from output dir
             try:
                 rel_path = Path(path).relative_to(Path(output_dir))
-                self.output_subfolder_var.set(str(rel_path) + "/")
+                self.subfolder_entry.delete(0, "end")
+                self.subfolder_entry.insert(0, str(rel_path) + "/")
             except ValueError:
                 # Not relative to output dir, just use the folder name
-                self.output_subfolder_var.set(Path(path).name + "/")
+                self.subfolder_entry.delete(0, "end")
+                self.subfolder_entry.insert(0, Path(path).name + "/")
         elif path:
             # No output dir set, just use folder name
-            self.output_subfolder_var.set(Path(path).name + "/")
+            self.subfolder_entry.delete(0, "end")
+            self.subfolder_entry.insert(0, Path(path).name + "/")
 
     def _update_timeout_label(self, value):
         """Update the timeout value label."""
@@ -882,8 +884,8 @@ class SyntyConverterApp:
                     self.high_quality_textures_var.set(settings["high_quality_textures"])
                 if "mesh_scale" in settings:
                     self.mesh_scale_var.set(settings["mesh_scale"])
-                if "output_subfolder" in settings:
-                    self.output_subfolder_var.set(settings["output_subfolder"])
+                if "output_subfolder" in settings and settings["output_subfolder"]:
+                    self.subfolder_entry.insert(0, settings["output_subfolder"])
                 if "retain_subfolders" in settings:
                     self.retain_subfolders_var.set(settings["retain_subfolders"])
                 # Migration: load old flatten_output setting (inverted)
@@ -918,7 +920,7 @@ class SyntyConverterApp:
             "skip_godot_import": self.skip_godot_import_var.get(),
             "high_quality_textures": self.high_quality_textures_var.get(),
             "mesh_scale": self.mesh_scale_var.get(),
-            "output_subfolder": self.output_subfolder_var.get(),
+            "output_subfolder": self.subfolder_entry.get(),
             "retain_subfolders": self.retain_subfolders_var.get(),
         }
 
@@ -993,7 +995,7 @@ class SyntyConverterApp:
             filter_pattern=self.filter_var.get() if self.filter_var.get() else None,
             high_quality_textures=self.high_quality_textures_var.get(),
             mesh_scale=mesh_scale,
-            output_subfolder=self.output_subfolder_var.get() if self.output_subfolder_var.get() else None,
+            output_subfolder=self.subfolder_entry.get() if self.subfolder_entry.get() else None,
             flatten_output=not self.retain_subfolders_var.get(),
         )
 
