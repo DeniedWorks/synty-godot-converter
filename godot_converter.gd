@@ -78,11 +78,15 @@ var default_material_name: String = ""
 ## - keep_meshes_together: If true, all meshes from one FBX are saved in a single scene.
 ## - mesh_format: Output format - "tscn" (text) or "res" (binary).
 ## - filter_pattern: Optional filter pattern for FBX filenames.
+## - output_subfolder: Optional subfolder prepended to pack names.
+## - retain_subfolders: If true, preserve Source_Files/FBX/ subdirectory structure.
 var config_pack_name: String = ""
 var config_keep_meshes_together: bool = false
 var config_mesh_format: String = "tscn"
 var config_filter_pattern: String = ""
 var config_mesh_scale: float = 1.0
+var config_output_subfolder: String = ""
+var config_retain_subfolders: bool = false
 
 
 ## Loads configuration options from converter_config.json.
@@ -134,6 +138,12 @@ func load_converter_config() -> bool:
 			config_mesh_scale = scale_val
 		else:
 			push_warning("Invalid mesh_scale %s, using 1.0" % scale_val)
+	var subfolder_val = data.get("output_subfolder", null)
+	config_output_subfolder = subfolder_val if subfolder_val != null else ""
+	# flatten_output from config is inverted to retain_subfolders
+	# flatten_output=true means don't retain subfolders, so retain_subfolders = NOT flatten_output
+	var flatten_val = data.get("flatten_output", true)  # default is flatten (true)
+	config_retain_subfolders = not flatten_val
 
 	print("Config loaded:")
 	if not config_pack_name.is_empty():
@@ -144,6 +154,10 @@ func load_converter_config() -> bool:
 		print("  filter_pattern: %s" % config_filter_pattern)
 	if config_mesh_scale != 1.0:
 		print("  mesh_scale: %s" % config_mesh_scale)
+	if not config_output_subfolder.is_empty():
+		print("  output_subfolder: %s" % config_output_subfolder)
+	if config_retain_subfolders:
+		print("  retain_subfolders: true")
 
 	return true
 
@@ -396,6 +410,10 @@ func process_fbx_file(fbx_path: String) -> void:
 	var models_prefix := current_pack_folder + "/models/"
 	var relative_path := fbx_path.trim_prefix(models_prefix)
 	var relative_dir := relative_path.get_base_dir()
+
+	# If retain_subfolders is disabled (default), flatten the directory structure
+	if not config_retain_subfolders:
+		relative_dir = ""
 
 	# Load the FBX as a PackedScene
 	var packed_scene: PackedScene = load(fbx_path)

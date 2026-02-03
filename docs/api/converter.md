@@ -65,6 +65,9 @@ class ConversionConfig:
     filter_pattern: str | None = None
     godot_timeout: int = 600
     high_quality_textures: bool = False
+    mesh_scale: float = 1.0
+    output_subfolder: str | None = None
+    flatten_output: bool = True
 ```
 
 #### Attributes
@@ -85,6 +88,9 @@ class ConversionConfig:
 | `filter_pattern` | `str \| None` | `None` | Only process FBX files matching this pattern (also filters textures) |
 | `godot_timeout` | `int` | `600` | Timeout for Godot CLI operations in seconds |
 | `high_quality_textures` | `bool` | `False` | Use BPTC compression for higher quality textures |
+| `mesh_scale` | `float` | `1.0` | Scale factor for mesh vertices |
+| `output_subfolder` | `str \| None` | `None` | Subfolder path prepended to pack folder names (e.g., "synty/") |
+| `flatten_output` | `bool` | `True` | Skip mirroring source directory structure (flattening is default; use --retain-subfolders CLI flag to preserve structure) |
 
 #### Example
 
@@ -250,10 +256,15 @@ def parse_args() -> ConversionConfig
 | `--verbose` | No | Enable verbose logging |
 | `--skip-fbx-copy` | No | Skip copying FBX files |
 | `--skip-godot-cli` | No | Skip running Godot CLI |
+| `--skip-godot-import` | No | Skip Godot's import phase (only run converter script) |
+| `--keep-meshes-together` | No | Keep all meshes from one FBX in a single scene |
+| `--mesh-format` | No | Output format: `tscn` (text) or `res` (binary) |
 | `--godot-timeout` | No | Timeout for Godot CLI (default: 600s) |
 | `--filter` | No | Filter pattern for FBX filenames (also filters textures) |
 | `--high-quality-textures` | No | Use BPTC compression for higher quality textures |
 | `--mesh-scale` | No | Scale factor for mesh import (default: 1.0) |
+| `--output-subfolder` | No | Subfolder path prepended to pack folder names (e.g., `synty/`) |
+| `--retain-subfolders` | No | Preserve source directory structure in mesh output (default: flattened) |
 
 ---
 

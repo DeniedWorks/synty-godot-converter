@@ -522,9 +522,12 @@ output/POLYGON_Pack/Models/Environment/Tree.fbx
 **Cause**: Earlier versions preserved the full source path including intermediate folders.
 
 **Solution**: Fixed with path stripping. The converter now:
-1. Detects common intermediate folders (`SourceFiles`, `FBX`, `Source`)
+1. Detects common intermediate folders (case-insensitive):
+   - `sourcefiles`, `source_files`, `source files`
+   - `fbx`, `models`, `bonusfbx`
 2. Strips these from output paths automatically
 3. Creates cleaner, more intuitive folder structures
+4. By default, paths are flattened. Use `--retain-subfolders` if you want to preserve the original subdirectory structure
 
 **Expected output structure**:
 ```

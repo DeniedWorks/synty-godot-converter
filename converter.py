@@ -352,6 +352,13 @@ class ConversionConfig:
         filter_pattern: Optional filter pattern for FBX filenames. If specified,
             only FBX files containing this pattern (case-insensitive) are
             processed. If None, all FBX files are processed.
+        output_subfolder: Optional subfolder path to prepend to pack folder names.
+            For example, "synty/" creates packs at output/synty/POLYGON_PackName/
+            instead of output/POLYGON_PackName/.
+        flatten_output: If True (default), skip mirroring the Source_Files/FBX/
+            subdirectory structure when creating mesh files. All meshes go directly
+            into meshes/tscn_separate/ instead of preserving source paths. Set to
+            False (via --retain-subfolders CLI flag) to preserve original structure.
 
     Example:
         >>> config = ConversionConfig(
@@ -379,6 +386,8 @@ class ConversionConfig:
     filter_pattern: str | None = None
     high_quality_textures: bool = False
     mesh_scale: float = 1.0
+    output_subfolder: str | None = None
+    flatten_output: bool = True
 
 
 @dataclass
@@ -565,6 +574,19 @@ Examples:
         default=1.0,
         help="Scale factor for mesh output (e.g., 100 for packs that are 100x too small)",
     )
+    parser.add_argument(
+        "--output-subfolder",
+        type=str,
+        default=None,
+        help="Subfolder path to prepend to pack folder names. "
+             "Example: --output-subfolder synty/ creates packs at output/synty/POLYGON_PackName/",
+    )
+    parser.add_argument(
+        "--retain-subfolders",
+        action="store_true",
+        help="Retain Source_Files/FBX/ subdirectory structure in mesh output. "
+             "By default, paths are flattened and all meshes go directly to meshes/tscn_separate/.",
+    )
 
     args = parser.parse_args()
 
@@ -616,6 +638,8 @@ Examples:
         filter_pattern=args.filter,
         high_quality_textures=args.high_quality_textures,
         mesh_scale=args.mesh_scale,
+        output_subfolder=args.output_subfolder,
+        flatten_output=not args.retain_subfolders,
     )
 
 
@@ -1247,6 +1271,8 @@ def generate_converter_config(
     mesh_format: str,
     filter_pattern: str | None,
     mesh_scale: float,
+    output_subfolder: str | None,
+    flatten_output: bool,
     dry_run: bool,
 ) -> None:
     """Generate converter_config.json for Godot's godot_converter.gd script.
@@ -1265,6 +1291,8 @@ def generate_converter_config(
         mesh_format: Output format - 'tscn' (text) or 'res' (binary).
         filter_pattern: Optional filter pattern for FBX filenames.
         mesh_scale: Scale factor for mesh vertices.
+        output_subfolder: Optional subfolder path prepended to pack folder names.
+        flatten_output: If True, skip mirroring source directory structure.
         dry_run: If True, only log what would be written.
     """
     config = {
@@ -1273,6 +1301,8 @@ def generate_converter_config(
         "mesh_format": mesh_format,
         "filter_pattern": filter_pattern,
         "mesh_scale": mesh_scale,
+        "output_subfolder": output_subfolder,
+        "flatten_output": flatten_output,
     }
 
     config_path = project_dir / "converter_config.json"
@@ -1295,6 +1325,8 @@ def run_godot_cli(
     filter_pattern: str | None = None,
     mesh_scale: float = 1.0,
     pack_name: str = "",
+    output_subfolder: str | None = None,
+    flatten_output: bool = True,
 ) -> tuple[bool, bool, bool]:
     """Run Godot CLI in two phases: import and convert.
 
@@ -1388,6 +1420,8 @@ def run_godot_cli(
         mesh_format,
         filter_pattern,
         mesh_scale,
+        output_subfolder,
+        flatten_output,
         dry_run,
     )
 
@@ -2029,8 +2063,13 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
     # Consistent output structure:
     # - project.godot at output_dir root (create new or merge uniforms)
     # - shaders/ at output_dir root (shared across all packs)
-    # - PackName/ subfolder for pack-specific assets
-    pack_output_dir = config.output_dir / pack_name
+    # - [output_subfolder/]PackName/ subfolder for pack-specific assets
+    if config.output_subfolder:
+        # Normalize subfolder path (ensure forward slashes and no leading slash)
+        subfolder = config.output_subfolder.replace("\\", "/").strip("/")
+        pack_output_dir = config.output_dir / subfolder / pack_name
+    else:
+        pack_output_dir = config.output_dir / pack_name
     shaders_dir = config.output_dir / "shaders"
     project_dir = config.output_dir
 
@@ -2195,7 +2234,11 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
             materials_dir = pack_output_dir / "materials"
 
             # Pack-relative texture path (textures are in pack folder, not root)
-            texture_base = f"res://{pack_name}/textures"
+            if config.output_subfolder:
+                subfolder = config.output_subfolder.replace("\\", "/").strip("/")
+                texture_base = f"res://{subfolder}/{pack_name}/textures"
+            else:
+                texture_base = f"res://{pack_name}/textures"
 
             for mapped_mat in mapped_materials:
                 # Skip materials not used by filtered FBX files
@@ -2301,7 +2344,7 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
                 models_dir = pack_output_dir / "models"
 
                 # Common prefixes to strip from FBX paths (case-insensitive)
-                common_prefixes = {"sourcefiles", "source files", "fbx", "models"}
+                common_prefixes = {"sourcefiles", "source_files", "source files", "fbx", "models", "bonusfbx"}
 
                 for fbx_path in fbx_files:
                     # Get relative path from source and strip common prefixes
@@ -2393,6 +2436,13 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
         if not config.skip_godot_cli:
             logger.info("Step 12: Running Godot CLI...")
 
+            # Build the full pack name including subfolder for GDScript config
+            if config.output_subfolder:
+                subfolder = config.output_subfolder.replace("\\", "/").strip("/")
+                full_pack_name = f"{subfolder}/{pack_name}"
+            else:
+                full_pack_name = pack_name
+
             (
                 stats.godot_import_success,
                 stats.godot_convert_success,
@@ -2407,7 +2457,9 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
                 mesh_format=config.mesh_format,
                 filter_pattern=config.filter_pattern,
                 mesh_scale=config.mesh_scale,
-                pack_name=pack_name,
+                pack_name=full_pack_name,
+                output_subfolder=config.output_subfolder,
+                flatten_output=config.flatten_output,
             )
 
             # Count generated mesh files

@@ -196,6 +196,8 @@ For detailed GUI documentation, see [GUI Application](steps/gui.md).
 | `--filter` | None | Filter pattern for FBX filenames (case-insensitive). Only FBX files containing the pattern are processed. Also filters textures AND materials to only include those needed by filtered FBX files. Example: `--filter Tree` |
 | `--high-quality-textures` | Off | Use BPTC compression for higher quality textures. Produces larger files but better visual quality. Default uses lossless compression for faster Godot import times. |
 | `--mesh-scale` | 1.0 | Scale factor for mesh vertices. Use when packs are undersized (e.g., `--mesh-scale 100` for packs that are 100x too small). |
+| `--output-subfolder` | None | Subfolder path prepended to pack folder names. Example: `--output-subfolder synty/` creates packs at `output/synty/POLYGON_PackName/` instead of `output/POLYGON_PackName/`. Useful for organizing multiple packs. |
+| `--retain-subfolders` | Off | Preserve Source_Files/FBX/ subdirectory structure in mesh output. By default, paths are flattened and all meshes go directly to `meshes/tscn_separate/`. |
 
 ---
 
@@ -416,6 +418,49 @@ python converter.py ... --mesh-scale 100
 ```
 
 Some Synty packs may import at 1/100th scale. Use this option to fix the scale during conversion rather than manually rescaling in Godot. The scale factor is applied to all mesh vertices during the Godot conversion step.
+
+### Output Subfolder
+
+**Organize packs into a subfolder** within the output directory:
+
+```bash
+python converter.py ... --output-subfolder synty/
+```
+
+This option prepends a subfolder path to pack folder names. Without it, packs go directly into the output directory. With it, packs are nested under the specified subfolder:
+
+| Command | Output Location |
+|---------|-----------------|
+| `--output "C:/Project"` | `C:/Project/POLYGON_Fantasy/` |
+| `--output "C:/Project" --output-subfolder synty/` | `C:/Project/synty/POLYGON_Fantasy/` |
+| `--output "C:/Project" --output-subfolder assets/synty/` | `C:/Project/assets/synty/POLYGON_Fantasy/` |
+
+This is useful for:
+- Organizing multiple packs under a common folder
+- Keeping Synty assets separate from other project assets
+- Matching existing project structure conventions
+
+### Retain Subfolders
+
+**Preserve source directory structure** in mesh output:
+
+```bash
+python converter.py ... --retain-subfolders
+```
+
+By default, the converter flattens output and all meshes go directly into `meshes/tscn_separate/` without subdirectories. With `--retain-subfolders`, the subdirectory structure from the FBX source files is preserved (e.g., `meshes/tscn_separate/Props/` or `meshes/tscn_separate/Environment/`).
+
+| Mode | Output Structure |
+|------|------------------|
+| Default (flattened) | `meshes/tscn_separate/SM_Prop_Barrel.tscn` |
+| `--retain-subfolders` | `meshes/tscn_separate/Props/SM_Prop_Barrel.tscn` |
+
+Flattening (the default) is useful when:
+- You prefer a flat file structure
+- Your source FBX paths have unwanted nesting (e.g., `Source_Files/FBX/...`)
+- You're filtering to a small subset of assets and don't need subdirectories
+
+**Note:** The converter automatically strips common Synty path prefixes (`sourcefiles`, `source_files`, `fbx`, `models`, `bonusfbx`) from FBX paths when copying, regardless of whether flatten output is enabled. This prevents deeply nested output structures.
 
 ---
 

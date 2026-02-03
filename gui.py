@@ -47,7 +47,7 @@ from converter import ConversionConfig, ConversionStats, run_conversion
 # --- Constants ---
 
 APP_TITLE = "SYNTY CONVERTER"
-APP_VERSION = "2.1"
+APP_VERSION = "2.4"
 DEFAULT_WINDOW_SIZE = "1080x640"
 
 # Default paths
@@ -70,6 +70,9 @@ PATHS:
 - Source Files: The SourceFiles folder containing FBX and textures
 - Output Directory: Where the converted Godot project will be created
 - Godot Executable: Path to Godot 4.6+ executable
+- Output Subfolder: Optional base path for pack folders.
+  Example: "synty/" puts packs in synty/POLYGON_PackName/
+  Useful for organizing multiple packs under one folder.
 
 OUTPUT OPTIONS:
 - Output Format:
@@ -86,15 +89,20 @@ FILTERS:
 - Mesh Scale: Scale factor for mesh vertices (default 1.0)
   Example: Use 100 for packs that are 100x too small
 
-ADVANCED:
+ADVANCED (Row 1):
 - Verbose: Show detailed logging
-- Dry run: Preview what would happen without writing files
-- Skip FBX copy: Don't copy FBX files (use if already copied)
+- Dry Run: Preview what would happen without writing files
+- Skip FBX Copy: Don't copy FBX files (use if already copied)
+- Retain Subfolders: Keep Source_Files/FBX/ subdirectory structure
+  in mesh output. When unchecked (default), paths are flattened and
+  all meshes go directly to meshes/tscn_separate/
+
+ADVANCED (Row 2):
 - Skip Godot CLI: Generate materials only, no mesh conversion
-- Skip Godot import: Skip Godot's import step (manual import needed)
-- High quality textures: Use BPTC compression (slower import, better quality)
+- Skip Godot Import: Skip Godot's import step (manual import needed)
+- HQ Textures: Use BPTC compression (slower import, better quality)
   Default uses lossless compression for faster Godot import times.
-- Godot Timeout: How long to wait for Godot operations
+- Timeout: How long to wait for Godot operations
 """
 
 
@@ -297,11 +305,30 @@ class SyntyConverterApp:
         )
         godot_browse.grid(row=row, column=2, pady=4)
 
+        # Output Subfolder (optional path prefix for packs)
+        row += 1
+        subfolder_label = ctk.CTkLabel(paths_frame, text="Output Subfolder:", anchor="w", width=120)
+        subfolder_label.grid(row=row, column=0, sticky="w", pady=4)
+
+        self.output_subfolder_var = ctk.StringVar()
+        subfolder_entry = ctk.CTkEntry(
+            paths_frame,
+            textvariable=self.output_subfolder_var,
+            placeholder_text='e.g., synty/'
+        )
+        subfolder_entry.grid(row=row, column=1, sticky="ew", padx=5, pady=4)
+
+        subfolder_browse = ctk.CTkButton(
+            paths_frame, text="...", width=35,
+            command=self._browse_subfolder
+        )
+        subfolder_browse.grid(row=row, column=2, pady=4)
+
     def _create_output_options(self, parent):
         """Create the output format and mesh mode segmented buttons."""
         # Center container for the options
         options_frame = ctk.CTkFrame(parent, fg_color="transparent")
-        options_frame.pack(pady=(20, 15), anchor="center")
+        options_frame.pack(pady=(15, 10), anchor="center")
 
         # Inner frame to hold both selectors side by side
         selectors_frame = ctk.CTkFrame(options_frame, fg_color="transparent")
@@ -344,15 +371,6 @@ class SyntyConverterApp:
         )
         self.mesh_mode_selector.set("Separate")  # default
         self.mesh_mode_selector.pack(anchor="center", pady=(5, 0))
-
-        # Mesh output path label (shows computed subfolder)
-        self.mesh_output_label = ctk.CTkLabel(
-            options_frame,
-            text="Mesh output: meshes/tscn_separate/",
-            font=ctk.CTkFont(size=11),
-            text_color="gray"
-        )
-        self.mesh_output_label.pack(anchor="center", pady=(10, 0))
 
         # Mesh Scale selector
         scale_frame = ctk.CTkFrame(selectors_frame, fg_color="transparent")
@@ -411,6 +429,15 @@ class SyntyConverterApp:
         )
         scale_entry.pack(anchor="center", pady=(5, 0))
 
+        # Mesh output path label (shows computed subfolder) - below selectors
+        self.mesh_output_label = ctk.CTkLabel(
+            options_frame,
+            text="Mesh output: meshes/tscn_separate/",
+            font=ctk.CTkFont(size=11),
+            text_color="gray"
+        )
+        self.mesh_output_label.pack(anchor="center", pady=(8, 0))
+
     def _on_format_change(self, value: str):
         """Handle output format selection change."""
         self._update_mesh_output_label()
@@ -438,7 +465,7 @@ class SyntyConverterApp:
         return has_materials or has_textures or has_models
 
     def _create_filter_section(self, parent):
-        """Create the filter input."""
+        """Create the filter input and output structure options."""
         filter_frame = ctk.CTkFrame(parent, fg_color="transparent")
         filter_frame.pack(pady=(0, 15), anchor="center")
 
@@ -490,7 +517,7 @@ class SyntyConverterApp:
         self.timeout_value_label.pack(side="left")
 
         # Spacer between timeout and checkboxes
-        spacer_frame = ctk.CTkFrame(advanced_frame, fg_color="transparent", height=45)
+        spacer_frame = ctk.CTkFrame(advanced_frame, fg_color="transparent", height=20)
         spacer_frame.pack(fill="x")
         spacer_frame.pack_propagate(False)
 
@@ -503,27 +530,36 @@ class SyntyConverterApp:
             checkbox_frame1,
             text="Verbose",
             variable=self.verbose_var,
-            width=120
+            width=105
         )
-        verbose_cb.pack(side="left", padx=(0, 10))
+        verbose_cb.pack(side="left", padx=5)
 
         self.dry_run_var = ctk.BooleanVar(value=False)
         dry_run_cb = ctk.CTkCheckBox(
             checkbox_frame1,
-            text="Dry run",
+            text="Dry Run",
             variable=self.dry_run_var,
-            width=120
+            width=105
         )
-        dry_run_cb.pack(side="left", padx=(0, 10))
+        dry_run_cb.pack(side="left", padx=5)
 
         self.skip_fbx_var = ctk.BooleanVar(value=False)
         skip_fbx_cb = ctk.CTkCheckBox(
             checkbox_frame1,
-            text="Skip FBX copy",
+            text="Skip FBX Copy",
             variable=self.skip_fbx_var,
+            width=105
+        )
+        skip_fbx_cb.pack(side="left", padx=5)
+
+        self.retain_subfolders_var = ctk.BooleanVar(value=False)
+        retain_subfolders_cb = ctk.CTkCheckBox(
+            checkbox_frame1,
+            text="Retain Subfolders",
+            variable=self.retain_subfolders_var,
             width=120
         )
-        skip_fbx_cb.pack(side="left")
+        retain_subfolders_cb.pack(side="left", padx=5)
 
         # Checkbox grid - row 2
         checkbox_frame2 = ctk.CTkFrame(advanced_frame, fg_color="transparent")
@@ -534,25 +570,25 @@ class SyntyConverterApp:
             checkbox_frame2,
             text="Skip Godot CLI",
             variable=self.skip_godot_cli_var,
-            width=120
+            width=115
         )
-        skip_cli_cb.pack(side="left", padx=(0, 10))
+        skip_cli_cb.pack(side="left", padx=(0, 5))
 
         self.skip_godot_import_var = ctk.BooleanVar(value=False)
         skip_import_cb = ctk.CTkCheckBox(
             checkbox_frame2,
-            text="Skip Godot import",
+            text="Skip Godot Import",
             variable=self.skip_godot_import_var,
-            width=140
+            width=130
         )
-        skip_import_cb.pack(side="left", padx=(0, 10))
+        skip_import_cb.pack(side="left", padx=(0, 5))
 
         self.high_quality_textures_var = ctk.BooleanVar(value=False)
         high_quality_cb = ctk.CTkCheckBox(
             checkbox_frame2,
-            text="High quality textures",
+            text="HQ Textures",
             variable=self.high_quality_textures_var,
-            width=160
+            width=110
         )
         high_quality_cb.pack(side="left")
 
@@ -683,6 +719,26 @@ class SyntyConverterApp:
         )
         if path:
             var.set(path)
+
+    def _browse_subfolder(self):
+        """Browse for output subfolder relative to output directory."""
+        output_dir = self.output_dir_var.get()
+        initial_dir = output_dir if output_dir else None
+        path = filedialog.askdirectory(
+            title="Select Output Subfolder",
+            initialdir=initial_dir
+        )
+        if path and output_dir:
+            # Try to compute relative path from output dir
+            try:
+                rel_path = Path(path).relative_to(Path(output_dir))
+                self.output_subfolder_var.set(str(rel_path) + "/")
+            except ValueError:
+                # Not relative to output dir, just use the folder name
+                self.output_subfolder_var.set(Path(path).name + "/")
+        elif path:
+            # No output dir set, just use folder name
+            self.output_subfolder_var.set(Path(path).name + "/")
 
     def _update_timeout_label(self, value):
         """Update the timeout value label."""
@@ -826,6 +882,13 @@ class SyntyConverterApp:
                     self.high_quality_textures_var.set(settings["high_quality_textures"])
                 if "mesh_scale" in settings:
                     self.mesh_scale_var.set(settings["mesh_scale"])
+                if "output_subfolder" in settings:
+                    self.output_subfolder_var.set(settings["output_subfolder"])
+                if "retain_subfolders" in settings:
+                    self.retain_subfolders_var.set(settings["retain_subfolders"])
+                # Migration: load old flatten_output setting (inverted)
+                elif "flatten_output" in settings:
+                    self.retain_subfolders_var.set(not settings["flatten_output"])
 
                 # Update mesh output label after loading settings
                 self._update_mesh_output_label()
@@ -855,6 +918,8 @@ class SyntyConverterApp:
             "skip_godot_import": self.skip_godot_import_var.get(),
             "high_quality_textures": self.high_quality_textures_var.get(),
             "mesh_scale": self.mesh_scale_var.get(),
+            "output_subfolder": self.output_subfolder_var.get(),
+            "retain_subfolders": self.retain_subfolders_var.get(),
         }
 
         try:
@@ -928,6 +993,8 @@ class SyntyConverterApp:
             filter_pattern=self.filter_var.get() if self.filter_var.get() else None,
             high_quality_textures=self.high_quality_textures_var.get(),
             mesh_scale=mesh_scale,
+            output_subfolder=self.output_subfolder_var.get() if self.output_subfolder_var.get() else None,
+            flatten_output=not self.retain_subfolders_var.get(),
         )
 
         # Update UI state

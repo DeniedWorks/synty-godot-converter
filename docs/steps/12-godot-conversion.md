@@ -269,6 +269,9 @@ func load_converter_config() -> bool:
 | `mesh_format` | `string` | `"tscn"` | Output format: `"tscn"` (text) or `"res"` (binary) |
 | `filter_pattern` | `string` | `""` | Only process FBX files containing this pattern (case-insensitive) |
 | `pack_name` | `string` | `""` | Target specific pack folder for conversion |
+| `mesh_scale` | `float` | `1.0` | Scale factor for mesh vertices |
+| `output_subfolder` | `string` | `null` | Subfolder path prepended to pack folder names (e.g., `synty/`) |
+| `flatten_output` | `bool` | `true` | Skip mirroring source directory structure (default: flatten paths) |
 
 **Example converter_config.json:**
 
@@ -277,7 +280,10 @@ func load_converter_config() -> bool:
   "keep_meshes_together": false,
   "mesh_format": "tscn",
   "filter_pattern": "Tree",
-  "pack_name": "POLYGON_NatureBiomes"
+  "pack_name": "POLYGON_NatureBiomes",
+  "mesh_scale": 1.0,
+  "output_subfolder": "synty/",
+  "flatten_output": true
 }
 ```
 

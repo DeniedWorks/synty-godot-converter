@@ -97,18 +97,24 @@ This approach:
 
 ### Common Prefix Stripping
 
-When copying FBX files, common Synty prefixes are stripped from paths:
+When copying FBX files, common Synty prefixes are stripped from paths. This is done case-insensitively to handle various pack structures:
 
 ```python
-COMMON_PREFIXES = ["SourceFiles", "FBX", "Models"]
+common_prefixes = {"sourcefiles", "source_files", "source files", "fbx", "models", "bonusfbx"}
 
-def strip_common_prefixes(path: Path) -> Path:
-    """Strip common Synty prefixes from a path."""
-    parts = list(path.parts)
-    while parts and parts[0] in COMMON_PREFIXES:
-        parts.pop(0)
-    return Path(*parts) if parts else path
+# Strip common prefixes from path
+path_parts = list(rel_path.parts)
+while path_parts and path_parts[0].lower() in common_prefixes:
+    path_parts.pop(0)
 ```
+
+**Recognized Prefixes (case-insensitive):**
+- `sourcefiles` - Standard Synty naming
+- `source_files` - With underscore variant
+- `source files` - With space variant
+- `fbx` - FBX model directories
+- `models` - Alternative model directories
+- `bonusfbx` - Bonus FBX content directories
 
 **Examples:**
 
@@ -118,6 +124,8 @@ def strip_common_prefixes(path: Path) -> Path:
 | `SourceFiles/FBX/SM_Tree.fbx` | `SM_Tree.fbx` |
 | `SourceFiles/Models/Environment/SM_Rock.fbx` | `Environment/SM_Rock.fbx` |
 | `FBX/Characters/SK_Character.fbx` | `Characters/SK_Character.fbx` |
+| `Source_Files/FBX/Props/SM_Chair.fbx` | `Props/SM_Chair.fbx` |
+| `BonusFBX/SM_Bonus_Item.fbx` | `SM_Bonus_Item.fbx` |
 
 ### Path Structure Preservation
 

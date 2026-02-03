@@ -193,7 +193,7 @@ help_btn.pack(side="right", padx=15, pady=7)
 
 **Location:** `_create_path_inputs()`
 
-**Purpose:** Four path entry fields with browse buttons for required paths.
+**Purpose:** Five path entry fields with browse buttons for required and optional paths.
 
 **Fields:**
 
@@ -203,6 +203,9 @@ help_btn.pack(side="right", padx=15, pady=7)
 | Source Files | `self.source_files_var` | (empty) | `--source-files` |
 | Output Directory | `self.output_dir_var` | `C:\Godot\Projects\converted-assets` | `--output` |
 | Godot Executable | `self.godot_exe_var` | `C:\Godot\Godot_v4.6-stable_mono_win64\Godot_v4.6-stable_mono_win64.exe` | `--godot` |
+| Output Subfolder | `self.output_subfolder_var` | (empty) | `--output-subfolder` |
+
+**Note:** The Output Subfolder field appears below the Godot Executable field in the paths section.
 
 **Layout:** 3-column grid with label, entry, and browse button.
 
@@ -226,6 +229,7 @@ browse.grid(row=N, column=2, pady=4)
 - **Source Files:** Opens directory dialog
 - **Output Directory:** Opens directory dialog
 - **Godot Executable:** Opens file dialog for `.exe` files
+- **Output Subfolder:** Opens directory dialog starting from the output directory, computes relative path
 
 ### Output Options
 
@@ -271,13 +275,14 @@ self.mesh_mode_selector.set("Separate")
 
 **Location:** `_create_filter_section()`
 
-**Purpose:** Text entry for FBX filename filtering.
+**Purpose:** Text entry for FBX filename filtering and mesh scale options.
 
 **Components:**
 
-| Widget | Variable | CLI Equivalent |
-|--------|----------|----------------|
-| Filter Entry | `self.filter_var` | `--filter` |
+| Widget | Variable | Default | CLI Equivalent |
+|--------|----------|---------|----------------|
+| Filter Entry | `self.filter_var` | (empty) | `--filter` |
+| Mesh Scale Slider | `self.mesh_scale_var` | 1.0 | `--mesh-scale` |
 
 ```python
 self.filter_var = ctk.StringVar()
@@ -289,7 +294,14 @@ filter_entry = ctk.CTkEntry(
 )
 ```
 
-**Behavior:** Empty string = no filter (all FBX files processed). Non-empty string = case-insensitive pattern match on FBX filenames.
+**Behavior:**
+- **Filter:** Empty string = no filter (all FBX files processed). Non-empty string = case-insensitive pattern match on FBX filenames. Also filters textures and materials to only include those needed by matching FBX files.
+
+**Note:** The Mesh output label appears below the output format/mesh mode/scale selectors to show the target mesh output directory (e.g., "meshes/tscn_separate/").
+
+**Output Subfolder** is now in the Path Input Fields section with a browse button that computes relative paths from the output directory.
+
+**Retain Subfolders** checkbox is now in the first row of Advanced Options (Row 1) with Verbose, Dry Run, and Skip FBX Copy.
 
 ### Advanced Options
 
@@ -322,8 +334,9 @@ timeout_slider = ctk.CTkSlider(
 | Checkbox | Variable | Default | CLI Equivalent |
 |----------|----------|---------|----------------|
 | Verbose | `self.verbose_var` | False | `--verbose` |
-| Dry run | `self.dry_run_var` | False | `--dry-run` |
-| Skip FBX copy | `self.skip_fbx_var` | False | `--skip-fbx-copy` |
+| Dry Run | `self.dry_run_var` | False | `--dry-run` |
+| Skip FBX Copy | `self.skip_fbx_var` | False | `--skip-fbx-copy` |
+| Retain Subfolders | `self.retain_subfolders_var` | False | `--retain-subfolders` |
 
 **Checkbox Options (Row 2):**
 
@@ -331,7 +344,9 @@ timeout_slider = ctk.CTkSlider(
 |----------|----------|---------|----------------|
 | Skip Godot CLI | `self.skip_godot_cli_var` | False | `--skip-godot-cli` |
 | Skip Godot import | `self.skip_godot_import_var` | False | `--skip-godot-import` |
-| High quality textures | `self.high_quality_textures_var` | False | `--high-quality-textures` |
+| HQ textures | `self.high_quality_textures_var` | False | `--high-quality-textures` |
+
+**Note:** All checkboxes in row 1 use equal width (105) and padding (5px) for consistent layout. "High quality textures" is displayed as "HQ textures" to fit within the column width.
 
 ```python
 self.verbose_var = ctk.BooleanVar(value=False)
@@ -339,7 +354,7 @@ verbose_cb = ctk.CTkCheckBox(
     checkbox_frame1,
     text="Verbose",
     variable=self.verbose_var,
-    width=120
+    width=105
 )
 ```
 
@@ -881,6 +896,8 @@ def _start_conversion(self):
 | `mesh_mode_selector` | `keep_meshes_together` | "Combined" -> True |
 | `format_selector` | `mesh_format` | direct |
 | `filter_var` | `filter_pattern` | empty string -> None |
+| `output_subfolder_var` | `output_subfolder` | empty string -> None |
+| `retain_subfolders_var` | `flatten_output` | inverted (retain_subfolders=False -> flatten_output=True) |
 
 ---
 
