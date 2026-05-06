@@ -862,12 +862,17 @@ COLOR_MAP_FOLIAGE: dict[str, str] = {
 COLOR_MAP_POLYGON: dict[str, str] = {
     # Base color/tint
     "_Color_Tint": "color_tint",
+    "_ColorTint": "color_tint",  # Synty's most common form (no underscore)
     "_Color": "color_tint",
     "_BaseColor": "color_tint",
     "_BaseColour": "color_tint",
-    # Emission
-    "_Emission_Color": "emission_color",
-    "_EmissionColor": "emission_color",
+    # Emission — polygon.gdshader's uniform is `emission_color_tint`,
+    # not `emission_color`. Writing the wrong shader_parameter name causes
+    # Godot to fall back to the shader's built-in default (vec4(1.0) / full
+    # white emission), which makes any material with an emission texture
+    # glow pure white regardless of the Unity _EmissionColor value.
+    "_Emission_Color": "emission_color_tint",
+    "_EmissionColor": "emission_color_tint",
     # Snow overlay
     "_Snow_Color": "snow_color",
     # Character colors (hair/skin)
