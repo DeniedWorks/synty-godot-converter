@@ -850,6 +850,7 @@ COLOR_MAP_FOLIAGE: dict[str, str] = {
     "_Leaf_Base_Color": "leaf_base_color",
     "_Trunk_Base_Color": "trunk_base_color",
     "_Leaf_Noise_Color": "leaf_noise_color",
+    "_Leaf_Noise_Large_Color": "leaf_noise_large_color",
     "_Trunk_Noise_Color": "trunk_noise_color",
     "_Emissive_Color": "emissive_color",
     "_Emissive_2_Color": "emissive_2_color",
@@ -1101,6 +1102,7 @@ ALPHA_FIX_PROPERTIES: set[str] = {
     "_Color_BodyArt",
     # Foliage noise colors
     "_Leaf_Noise_Color",
+    "_Leaf_Noise_Large_Color",
     "_Trunk_Noise_Color",
 }
 
@@ -1518,7 +1520,8 @@ def detect_shader_type(
         }
         foliage_color_props = {
             "_Leaf_Base_Color", "_Trunk_Base_Color", "_Leaf_Noise_Color",
-            "_Trunk_Noise_Color", "_Frosting_Color", "_Trunk_Emissive_Color"
+            "_Leaf_Noise_Large_Color", "_Trunk_Noise_Color",
+            "_Frosting_Color", "_Trunk_Emissive_Color"
         }
         foliage_props = sum(1 for p in foliage_float_props if p in floats)
         foliage_props += sum(1 for p in foliage_color_props if p in colors)
