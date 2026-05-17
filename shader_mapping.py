@@ -329,7 +329,7 @@ SHADER_NAME_PATTERNS_SCORED: list[tuple[re.Pattern[str], str, int]] = [
     # --------------------------------------------------------------------------
     # These are common in compound names and shouldn't override more specific
     # technical terms. "Dirt_Leaves_Triplanar" should use polygon, not foliage.
-    (re.compile(r"(?i)(tree|fern|grass|vine|branch|willow|bush|shrub|hedge|bamboo|koru|treefern)"), "foliage.gdshader", 25),
+    (re.compile(r"(?i)(tree|fern|grass|vine|branch|willow|bush|shrub|hedge|bamboo|koru|treefern|flower|sunflower|wildflower|cropfield|crop|cover|card_|kite|leaves)"), "foliage.gdshader", 25),
     (re.compile(r"(?i)(leaf|leaves)"), "foliage.gdshader", 20),  # Very common, low priority
     (re.compile(r"(?i)(bark|trunk|undergrowth|plant)"), "foliage.gdshader", 20),
 
@@ -850,6 +850,7 @@ COLOR_MAP_FOLIAGE: dict[str, str] = {
     "_Leaf_Base_Color": "leaf_base_color",
     "_Trunk_Base_Color": "trunk_base_color",
     "_Leaf_Noise_Color": "leaf_noise_color",
+    "_Leaf_Noise_Large_Color": "leaf_noise_large_color",
     "_Trunk_Noise_Color": "trunk_noise_color",
     "_Emissive_Color": "emissive_color",
     "_Emissive_2_Color": "emissive_2_color",
@@ -862,12 +863,17 @@ COLOR_MAP_FOLIAGE: dict[str, str] = {
 COLOR_MAP_POLYGON: dict[str, str] = {
     # Base color/tint
     "_Color_Tint": "color_tint",
+    "_ColorTint": "color_tint",  # Synty's most common form (no underscore)
     "_Color": "color_tint",
     "_BaseColor": "color_tint",
     "_BaseColour": "color_tint",
-    # Emission
-    "_Emission_Color": "emission_color",
-    "_EmissionColor": "emission_color",
+    # Emission — polygon.gdshader's uniform is `emission_color_tint`,
+    # not `emission_color`. Writing the wrong shader_parameter name causes
+    # Godot to fall back to the shader's built-in default (vec4(1.0) / full
+    # white emission), which makes any material with an emission texture
+    # glow pure white regardless of the Unity _EmissionColor value.
+    "_Emission_Color": "emission_color_tint",
+    "_EmissionColor": "emission_color_tint",
     # Snow overlay
     "_Snow_Color": "snow_color",
     # Character colors (hair/skin)
@@ -1096,6 +1102,7 @@ ALPHA_FIX_PROPERTIES: set[str] = {
     "_Color_BodyArt",
     # Foliage noise colors
     "_Leaf_Noise_Color",
+    "_Leaf_Noise_Large_Color",
     "_Trunk_Noise_Color",
 }
 
@@ -1513,7 +1520,8 @@ def detect_shader_type(
         }
         foliage_color_props = {
             "_Leaf_Base_Color", "_Trunk_Base_Color", "_Leaf_Noise_Color",
-            "_Trunk_Noise_Color", "_Frosting_Color", "_Trunk_Emissive_Color"
+            "_Leaf_Noise_Large_Color", "_Trunk_Noise_Color",
+            "_Frosting_Color", "_Trunk_Emissive_Color"
         }
         foliage_props = sum(1 for p in foliage_float_props if p in floats)
         foliage_props += sum(1 for p in foliage_color_props if p in colors)
