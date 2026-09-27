@@ -539,7 +539,7 @@ print(f"Pack 2: Copied {copied} shaders")  # 0 shaders (already exist)
 - [User Guide - Output Structure](../user-guide.md#output-structure) - End-user view of output
 - [API Reference - converter.py](../api/converter.md) - Full API documentation
 - [Step 1: Validate Inputs](01-validate-inputs.md) - Previous step in pipeline
-- [Step 3: Extract Unity Package](03-extract-package.md) - Next step in pipeline
+- [Step 3: Extract Unity Package](03-extract-unity-package.md) - Next step in pipeline
 
 ---
 

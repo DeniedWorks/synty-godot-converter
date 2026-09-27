@@ -257,7 +257,7 @@ Maps Unity texture properties to Godot parameters for the foliage shader.
 
 ### TEXTURE_MAP_POLYGON
 
-Maps Unity texture properties to Godot parameters for the polygon shader. This is the largest texture map with **37 entries**.
+Maps Unity texture properties to Godot parameters for the polygon shader. This is the largest texture map with **60 entries**.
 
 #### Base Textures
 
@@ -268,6 +268,8 @@ Maps Unity texture properties to Godot parameters for the polygon shader. This i
 | `_BaseMap` | `base_texture` | URP standard name |
 | `_MainTex` | `base_texture` | Built-in standard name |
 | `_MainTexture` | `base_texture` | Legacy name |
+| `_Texture` | `base_texture` | CustomCharacters shader (FantasyHero, ModularHero) |
+| `_ColorMap` | `base_texture` | Sidekick: baked 32x32 per-character palette |
 
 #### Normal Maps
 
@@ -1048,7 +1050,7 @@ When creating placeholder materials for missing references:
 | `SHADER_GUID_MAP` | 56 |
 | `SHADER_NAME_PATTERNS_SCORED` | 20 |
 | `TEXTURE_MAP_FOLIAGE` | 8 |
-| `TEXTURE_MAP_POLYGON` | 37 |
+| `TEXTURE_MAP_POLYGON` | 60 |
 | `TEXTURE_MAP_CRYSTAL` | 4 |
 | `TEXTURE_MAP_WATER` | 2 |
 | `TEXTURE_MAP_PARTICLES` | 1 |

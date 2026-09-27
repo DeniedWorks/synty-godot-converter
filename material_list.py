@@ -329,20 +329,38 @@ def get_mesh_to_materials_map(prefabs: list[PrefabMaterials]) -> dict[str, list[
         ['Foliage_Mat', 'Trunk_Mat']
 
     Note:
-        If duplicate mesh names are found, a warning is logged and the
-        later entry overwrites the earlier one.
+        A mesh can be named by several prefabs. Synty's character prefabs list
+        not only their own mesh but every sibling character the prefab can swap
+        to, and a spare is listed with one slot where its own prefab gives it
+        all of them. The fullest entry wins, since a shorter one is that same
+        mesh described with surfaces missing; entries of equal length keep the
+        last, which is what this function has always done.
     """
     result: dict[str, list[str]] = {}
 
     for prefab in prefabs:
         for mesh in prefab.meshes:
             material_names = [slot.material_name for slot in mesh.slots]
-            if mesh.mesh_name in result:
+            existing = result.get(mesh.mesh_name)
+
+            if existing is not None and len(existing) > len(material_names):
+                # Dropping these slots left the mesh's other surfaces on
+                # Godot's imported material, which renders flat white.
                 logger.debug(
-                    f"Duplicate mesh name found: {mesh.mesh_name!r}. "
-                    f"Previous materials: {result[mesh.mesh_name]}, "
-                    f"New materials: {material_names}. Using new values."
+                    f"Duplicate mesh name {mesh.mesh_name!r}: keeping the "
+                    f"{len(existing)}-slot entry {existing} over "
+                    f"{len(material_names)}-slot {material_names} from prefab "
+                    f"{prefab.prefab_name!r}."
                 )
+                continue
+
+            if existing is not None:
+                logger.debug(
+                    f"Duplicate mesh name {mesh.mesh_name!r}: keeping "
+                    f"{material_names} from prefab {prefab.prefab_name!r} over "
+                    f"{existing}."
+                )
+
             result[mesh.mesh_name] = material_names
 
     logger.debug(f"Built mesh-to-materials map: {len(result)} meshes")

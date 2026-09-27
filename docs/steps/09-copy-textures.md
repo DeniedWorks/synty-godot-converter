@@ -946,15 +946,15 @@ After reviewing the existing documentation, here are findings for consolidation:
 
 Add to the following docs:
 
-1. **`docs/architecture.md`** Step 8 section:
-   - Add: "See [Step 8: Copy Textures](steps/08-copy-textures.md) for detailed implementation."
+1. **`docs/architecture.md`** Step 9 section:
+   - Add: "See [Step 9: Copy Textures](steps/09-copy-textures.md) for detailed implementation."
 
 2. **`docs/api/converter.md`** copy_textures section:
-   - Add at top: "For detailed implementation documentation, see [Step 8: Copy Textures](../steps/08-copy-textures.md)."
+   - Add at top: "For detailed implementation documentation, see [Step 9: Copy Textures](../steps/09-copy-textures.md)."
    - Update function signature and return type
 
 3. **`docs/troubleshooting.md`** Missing Textures section:
-   - Add: "See [Step 8: Copy Textures](steps/08-copy-textures.md) for how textures are discovered and copied."
+   - Add: "See [Step 9: Copy Textures](steps/09-copy-textures.md) for how textures are discovered and copied."
 
 4. **`docs/api/unity_package.md`** GuidMap section:
    - Add `texture_guid_to_path` attribute

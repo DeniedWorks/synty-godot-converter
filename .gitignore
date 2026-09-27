@@ -39,3 +39,18 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+
+# Agent / assistant working files
+CLAUDE.md
+AGENTS.md
+GEMINI.md
+.claude/
+.cursor/
+.aider*
+docs/superpowers/
+
+# Conversion output and logs - Synty assets are licensed per user and
+# never belong in this repository
+*.log
+conversion_logs/
+*.unitypackage

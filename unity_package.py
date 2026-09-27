@@ -52,6 +52,12 @@ class GuidMap:
         texture_guid_to_name: Maps texture GUID to texture filename with
             extension (e.g., "Ground_01.png"). Only includes PNG, TGA, and
             JPG/JPEG files.
+        guid_to_prefab_content: Maps prefab GUID to raw .prefab file content
+            (bytes). Used by prefab_parser to derive mesh-to-material
+            mappings for packs that ship without MaterialList*.txt.
+        guid_to_sk_content: Maps GUID to raw .sk content. Sidekick packs ship
+            one .sk per character, listing the part meshes it is assembled
+            from. Empty for every other pack type.
 
     Example:
         >>> guid_map = extract_unitypackage(Path("MyPack.unitypackage"))
@@ -73,13 +79,16 @@ class GuidMap:
     guid_to_content: dict[str, bytes] = field(default_factory=dict)
     texture_guid_to_name: dict[str, str] = field(default_factory=dict)
     texture_guid_to_path: dict[str, Path] = field(default_factory=dict)
+    guid_to_prefab_content: dict[str, bytes] = field(default_factory=dict)
+    guid_to_sk_content: dict[str, bytes] = field(default_factory=dict)
 
     def __repr__(self) -> str:
         return (
             f"GuidMap(pathnames={len(self.guid_to_pathname)}, "
             f"contents={len(self.guid_to_content)}, "
             f"textures={len(self.texture_guid_to_name)}, "
-            f"texture_paths={len(self.texture_guid_to_path)})"
+            f"texture_paths={len(self.texture_guid_to_path)}, "
+            f"prefabs={len(self.guid_to_prefab_content)})"
         )
 
 
@@ -145,6 +154,14 @@ def extract_unitypackage(package_path: Path) -> GuidMap:
     guid_to_content = _extract_material_contents(guid_data, guid_to_pathname)
     logger.debug("Extracted content for %d material files", len(guid_to_content))
 
+    # Extract .prefab contents (fallback mesh-material source when no MaterialList)
+    guid_to_prefab_content = _extract_prefab_contents(guid_data, guid_to_pathname)
+    logger.debug("Extracted content for %d prefab files", len(guid_to_prefab_content))
+
+    guid_to_sk_content = _extract_sk_contents(guid_data, guid_to_pathname)
+    if guid_to_sk_content:
+        logger.debug("Extracted %d Sidekick recipe(s)", len(guid_to_sk_content))
+
     # Extract textures to temp files
     temp_dir = Path(tempfile.mkdtemp(prefix="synty_textures_"))
     texture_guid_to_path = _extract_textures_to_temp(guid_data, guid_to_pathname, temp_dir)
@@ -159,6 +176,8 @@ def extract_unitypackage(package_path: Path) -> GuidMap:
         guid_to_content=guid_to_content,
         texture_guid_to_name=texture_guid_to_name,
         texture_guid_to_path=texture_guid_to_path,
+        guid_to_prefab_content=guid_to_prefab_content,
+        guid_to_sk_content=guid_to_sk_content,
     )
 
 
@@ -343,13 +362,56 @@ def _build_texture_guid_map(guid_to_pathname: dict[str, str]) -> dict[str, str]:
     return texture_guid_to_name
 
 
+def _extract_contents_by_extension(
+    guid_data: dict[str, dict[str, bytes]],
+    guid_to_pathname: dict[str, str],
+    extension: str,
+    *,
+    warn_on_missing: bool = True,
+) -> dict[str, bytes]:
+    """Extract raw content for every asset with the given extension.
+
+    Args:
+        guid_data: Parsed tar structure from _parse_tar_structure.
+        guid_to_pathname: GUID to pathname mapping for identifying assets.
+        extension: Lowercase extension to match, including the dot
+            (e.g. ".mat", ".prefab").
+        warn_on_missing: Log a warning when a matching asset has no 'asset'
+            file. Prefabs are numerous and non-critical, so callers may
+            downgrade this to a debug-level skip.
+
+    Returns:
+        Dictionary mapping asset GUID to raw file content (bytes).
+        The content is the 'asset' file from the GUID folder.
+    """
+    guid_to_content: dict[str, bytes] = {}
+
+    for guid, pathname in guid_to_pathname.items():
+        if not pathname.lower().endswith(extension):
+            continue
+
+        files = guid_data.get(guid, {})
+
+        if "asset" not in files:
+            if warn_on_missing:
+                logger.warning(
+                    "Asset %s (GUID: %s) has no asset file", pathname, guid
+                )
+            else:
+                logger.debug(
+                    "Asset %s (GUID: %s) has no asset file", pathname, guid
+                )
+            continue
+
+        guid_to_content[guid] = files["asset"]
+
+    return guid_to_content
+
+
 def _extract_material_contents(
     guid_data: dict[str, dict[str, bytes]], guid_to_pathname: dict[str, str]
 ) -> dict[str, bytes]:
     """Extract raw content for .mat files.
-
-    Filters the parsed tar data to extract only material files (.mat),
-    returning their raw bytes for later parsing by unity_parser.
 
     Args:
         guid_data: Parsed tar structure from _parse_tar_structure.
@@ -357,29 +419,48 @@ def _extract_material_contents(
 
     Returns:
         Dictionary mapping material GUID to raw file content (bytes).
-        The content is the 'asset' file from the GUID folder.
-
-    Note:
-        Materials with no 'asset' file in their GUID folder are skipped
-        with a warning.
     """
-    guid_to_content: dict[str, bytes] = {}
+    return _extract_contents_by_extension(guid_data, guid_to_pathname, ".mat")
 
-    for guid, pathname in guid_to_pathname.items():
-        # Check if this is a .mat file
-        if not pathname.lower().endswith(".mat"):
-            continue
 
-        # Get the files for this GUID
-        files = guid_data.get(guid, {})
+def _extract_prefab_contents(
+    guid_data: dict[str, dict[str, bytes]], guid_to_pathname: dict[str, str]
+) -> dict[str, bytes]:
+    """Extract raw content for .prefab files.
 
-        if "asset" not in files:
-            logger.warning("Material %s (GUID: %s) has no asset file", pathname, guid)
-            continue
+    Consumed by prefab_parser.build_prefabs_from_package() as the fallback
+    source of mesh-to-material mappings when MaterialList*.txt is absent.
 
-        guid_to_content[guid] = files["asset"]
+    Args:
+        guid_data: Parsed tar structure from _parse_tar_structure.
+        guid_to_pathname: GUID to pathname mapping for identifying prefabs.
 
-    return guid_to_content
+    Returns:
+        Dictionary mapping prefab GUID to raw file content (bytes).
+    """
+    return _extract_contents_by_extension(
+        guid_data, guid_to_pathname, ".prefab", warn_on_missing=False
+    )
+
+
+def _extract_sk_contents(
+    guid_data: dict[str, dict[str, bytes]], guid_to_pathname: dict[str, str]
+) -> dict[str, bytes]:
+    """Extract raw content for .sk files.
+
+    Consumed by sidekick.build_sidekick_recipes(). Only SIDEKICK packs carry
+    these, so a missing asset file is unremarkable and warns at debug level.
+
+    Args:
+        guid_data: Parsed tar structure from _parse_tar_structure.
+        guid_to_pathname: GUID to pathname mapping for identifying .sk files.
+
+    Returns:
+        Dictionary mapping recipe GUID to raw file content (bytes).
+    """
+    return _extract_contents_by_extension(
+        guid_data, guid_to_pathname, ".sk", warn_on_missing=False
+    )
 
 
 def _extract_textures_to_temp(
@@ -419,6 +500,115 @@ def _extract_textures_to_temp(
         texture_guid_to_path[guid] = temp_file
 
     return texture_guid_to_path
+
+
+def extract_assets_to_directory(
+    package_path: Path,
+    out_dir: Path,
+    suffixes: set[str],
+    *,
+    strip_prefix: str = "",
+) -> int:
+    """Write every asset with one of the given suffixes to disk at its project path.
+
+    A .unitypackage is a gzipped tar of GUID-named folders, each holding an
+    asset's raw bytes beside the project path it belongs at, so writing the
+    bytes out at that path is all Unity's import does for a file-backed asset.
+
+    Args:
+        package_path: Path to the .unitypackage.
+        out_dir: Directory to write into. Project paths are preserved beneath
+            it, and it is created if absent.
+        suffixes: Lowercase extensions to match, including the dot
+            (e.g. {".fbx"}, {".png"}).
+        strip_prefix: Leading path segments to drop from each project path
+            (e.g. "Assets/Synty/"), for when the Unity project layout above the
+            pack carries no meaning in the destination.
+
+    Returns:
+        Number of files written.
+    """
+    with tarfile.open(package_path, "r:gz") as tar:
+        guid_data = _parse_tar_structure(tar)
+
+    guid_to_pathname = _build_guid_to_pathname(guid_data)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    written = 0
+    for guid, pathname in guid_to_pathname.items():
+        if PurePosixPath(pathname).suffix.lower() not in suffixes:
+            continue
+        payload = guid_data.get(guid, {}).get("asset")
+        if payload is None:
+            # Folder entries carry a pathname but no asset.
+            continue
+        relative = pathname
+        if strip_prefix and relative.startswith(strip_prefix):
+            relative = relative[len(strip_prefix):]
+        destination = out_dir / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(payload)
+        written += 1
+
+    logger.debug(
+        "Extracted %d %s from %s",
+        written,
+        "/".join(sorted(suffixes)),
+        package_path.name,
+    )
+    return written
+
+
+def count_assets_by_suffix(package_path: Path) -> dict[str, int]:
+    """Count a package's assets by file extension, without extracting anything.
+
+    Used to tell a mesh pack from a UI pack: the INTERFACE packs carry
+    thousands of PNGs and not one FBX, so the mesh pipeline has nothing to
+    work with and would report an empty conversion rather than an error.
+
+    Args:
+        package_path: Path to the .unitypackage.
+
+    Returns:
+        Lowercase extension (including the dot) to count. Folder entries,
+        which carry a pathname but no asset, are not counted.
+    """
+    with tarfile.open(package_path, "r:gz") as tar:
+        guid_data = _parse_tar_structure(tar)
+
+    counts: dict[str, int] = {}
+    for guid, pathname in _build_guid_to_pathname(guid_data).items():
+        if guid_data.get(guid, {}).get("asset") is None:
+            continue
+        suffix = PurePosixPath(pathname).suffix.lower()
+        counts[suffix] = counts.get(suffix, 0) + 1
+    return counts
+
+
+def extract_fbx_to_directory(package_path: Path, out_dir: Path) -> int:
+    """Write every FBX in a .unitypackage to disk at its project path.
+
+    The converter takes meshes from --source-files rather than from the
+    package, so a pack that was never imported into Unity has nothing to point
+    at - even though its FBX are sitting inside the .unitypackage. Writing them
+    out is all Unity's import does for a mesh, so this removes Unity from the
+    loop entirely.
+
+    Note that Synty's tool database is not in the package, so a pack extracted
+    this way has no Sidekick joint adjustments unless a copy of
+    Side_Kick_Data.db is placed alongside the extracted files.
+
+    Args:
+        package_path: Path to the .unitypackage.
+        out_dir: Directory to write into. Project paths are preserved beneath
+            it, and it is created if absent. Keep it outside any Godot project:
+            Godot imports everything under its project root, so extracting into
+            one silently doubles the imported assets.
+
+    Returns:
+        Number of FBX written.
+    """
+    return extract_assets_to_directory(package_path, out_dir, {".fbx"})
 
 
 def get_material_guids(guid_map: GuidMap) -> list[str]:

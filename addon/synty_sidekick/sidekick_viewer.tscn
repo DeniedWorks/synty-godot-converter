@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://jgyjdstl48jm"]
+
+[ext_resource type="Script" path="res://addons/synty_sidekick/sidekick_viewer.gd" id="1"]
+
+[node name="SidekickViewer" type="Node3D"]
+script = ExtResource("1")

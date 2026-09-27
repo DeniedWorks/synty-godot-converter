@@ -4,7 +4,7 @@ This directory contains comprehensive documentation for each step of the synty-c
 
 ## Pipeline Overview
 
-The converter follows a 12-step pipeline to transform Unity Synty asset packs into Godot-ready resources:
+The converter follows a 13-step pipeline to transform Unity Synty asset packs into Godot-ready resources:
 
 | Step | Document | Description |
 |------|----------|-------------|
@@ -21,10 +21,11 @@ The converter follows a 12-step pipeline to transform Unity Synty asset packs in
 | 10 | [10-copy-fbx.md](10-copy-fbx.md) | FBX model copying with structure preservation |
 | 11 | [11-generate-mapping.md](11-generate-mapping.md) | mesh_material_mapping.json generation |
 | 12 | [12-godot-conversion.md](12-godot-conversion.md) | Godot CLI mesh-to-scene conversion |
+| 13 | [13-resource-uids.md](13-resource-uids.md) | Stable `uid://` for generated scenes and materials |
 
 ## Step Number Mapping
 
-The documentation files use logical numbering (00-12), but `converter.py` uses different step numbers in its runtime logging. This table shows the relationship:
+The documentation files use logical numbering (00-13), but `converter.py` uses different step numbers in its runtime logging. This table shows the relationship:
 
 | File | Doc Step | Runtime Step | Description |
 |------|----------|--------------|-------------|
@@ -41,10 +42,11 @@ The documentation files use logical numbering (00-12), but `converter.py` uses d
 | 10-copy-fbx.md | 10 | Step 9 | Copy FBX files |
 | 11-generate-mapping.md | 11 | Step 10 | Generate mapping JSON |
 | 12-godot-conversion.md | 12 | Steps 11-12 | project.godot + Godot CLI |
+| 13-resource-uids.md | 13 | Step 13 | Stamp resource UIDs |
 
 **Why the difference?**
 - **Doc steps (0-12)**: Logical ordering for documentation - each file covers one conceptual area
-- **Runtime steps (1-12)**: What appears in `converter.py` console output during execution
+- **Runtime steps (1-13)**: What appears in `converter.py` console output during execution
 - **Merged steps**: Steps 5-6 in docs (MaterialList parsing + shader detection) are performed together as "Step 5: Parse material assignments and detect shaders" in the runtime
 
 When debugging or cross-referencing logs with documentation, use this table to find the correct doc file for a given runtime step.
@@ -67,6 +69,6 @@ Each step document follows a consistent structure:
 
 ## Quick Stats
 
-- **Total Documentation**: ~16,000 lines across 14 documents
+- **Total Documentation**: ~16,000 lines across 15 documents
 - **Largest Module**: shader_mapping.py (2,339 lines of code, 1,910 lines of docs)
 - **Most Complex Step**: Step 6 (Shader Detection) - 3-tier detection with 56 GUID mappings and 20 name patterns

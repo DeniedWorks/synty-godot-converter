@@ -10,6 +10,7 @@ The `tres_generator` module generates Godot `.tres` ShaderMaterial resource file
 - Generates valid Godot `.tres` format with proper resource structure
 - Handles textures, floats, bools, and colors
 - Auto-enables shader features based on textures present (28 rules)
+- Stamps a stable `uid://` into generated resources so Godot can address them
 - Proper number formatting (strips trailing zeros for clean output)
 - Sanitizes material names for filesystem safety
 
@@ -28,7 +29,7 @@ Godot's `.tres` format is a text-based resource format. ShaderMaterial files con
 ### Example Output
 
 ```tres
-[gd_resource type="ShaderMaterial" load_steps=4 format=3]
+[gd_resource type="ShaderMaterial" load_steps=4 format=3 uid="uid://dtw1bypimep"]
 
 [ext_resource type="Shader" path="res://shaders/foliage.gdshader" id="1"]
 [ext_resource type="Texture2D" path="res://textures/Fern_1.tga" id="2"]
@@ -52,6 +53,7 @@ shader_parameter/leaf_base_color = Color(1.0, 0.9, 0.8, 1.0)
 
 - **load_steps**: Number of external resources + 1 (for the resource itself)
 - **format=3**: Godot 4.x resource format version
+- **uid**: Present when a `res_path` was supplied; derived from that path, so it is stable across re-conversions
 - **ExtResource("id")**: References to external resources by their ID
 - Parameters are sorted alphabetically within each type for consistent output
 
@@ -59,7 +61,7 @@ shader_parameter/leaf_base_color = Color(1.0, 0.9, 0.8, 1.0)
 
 ## Functions
 
-### generate_tres(material, shader_base, texture_base, shader_paths=None) -> str
+### generate_tres(material, shader_base, texture_base, shader_paths=None, res_path=None) -> str
 
 Main entry point for `.tres` generation. Converts a `MappedMaterial` into complete `.tres` file content.
 
@@ -70,7 +72,8 @@ Main entry point for `.tres` generation. Converts a `MappedMaterial` into comple
 | `material` | `MappedMaterial` | required | The mapped material to convert |
 | `shader_base` | `str` | required | Resource path base for shaders (e.g., `"res://shaders"`) |
 | `texture_base` | `str` | required | Resource path base for textures (e.g., `"res://textures"`) |
-| `shader_paths` | `dict[str, Path] \| None` | `None` | Optional mapping of shader names to their actual paths (for project-local shader resolution) |
+| `shader_paths` | `dict[str, str] \| None` | `None` | Optional mapping of shader names to their actual paths (for project-local shader resolution) |
+| `res_path` | `str \| None` | `None` | The resource's own `res://` path. When given, the header carries a `uid://` derived from it |
 
 **Returns:** `str` - Complete `.tres` file content as a string
 
@@ -78,6 +81,7 @@ Main entry point for `.tres` generation. Converts a `MappedMaterial` into comple
 - If `shader_paths` is provided, uses the mapped path for the shader reference
 - If `shader_paths` is `None` or the shader isn't in the map, falls back to `shader_base/shader_file`
 - Enables using project-local shaders instead of bundled ones
+- If `res_path` is provided, the header gains `uid="uid://..."` from `uid_for_path()`
 
 **Example:**
 
@@ -284,6 +288,69 @@ format_color(0.0, 0.0, 0.0, 1.0)   # -> "Color(0.0, 0.0, 0.0, 1.0)"
 
 ---
 
+### uid_for_path(res_path) -> str
+
+Derives a stable `uid://` for a resource from its `res://` path.
+
+Godot assigns a UID only when the editor *saves* a resource, so a generated `.tres` whose header lacks one never gets a UID and cannot be referenced as `uid://`. Deriving the UID from the path instead of at random keeps it stable across re-runs, so re-converting a pack does not invalidate references to it.
+
+**Arguments:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `res_path` | `str` | The resource's `res://` path, e.g. `"res://Pack/materials/M.tres"` |
+
+**Returns:** `str` - A `uid://` string Godot's `ResourceUID` accepts
+
+**Behavior:**
+- Takes 60 bits of an MD5 of the path, inside the positive range Godot masks ids into
+- Encodes them in Godot's base-34 alphabet (`a`-`z` = 0-25, `0`-`9` = 25-34), matching `ResourceUID::id_to_text`
+
+**Example:**
+
+```python
+from tres_generator import uid_for_path
+
+uid_for_path("res://POLYGON_Dungeon/materials/Fern_01.tres")  # -> "uid://dtw1bypimep"
+```
+
+---
+
+### stamp_resource_uids(directory, project_root=None) -> int
+
+Gives every text resource under a directory a UID if it has none.
+
+The Godot side saves scenes from a dozen call sites and `ResourceSaver` does not assign UIDs, so they are stamped here in one pass instead. Binary `.res` resources are left alone - their header is not text to patch.
+
+**Arguments:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `directory` | `Path` | required | Where to look, usually one pack's output folder |
+| `project_root` | `Path \| None` | `None` | The Godot project root that `res://` addresses are relative to. Defaults to `directory` |
+
+**Returns:** `int` - Number of files given a UID
+
+**Behavior:**
+- Scans `.tscn` and `.tres` files recursively, skipping anything under `.godot`
+- Only patches a first line that is a `[gd_scene ...]` or `[gd_resource ...]` tag; a header that already has `uid=` is left untouched
+- Pass the real `project_root` when scanning a subfolder: a UID derived from a pack-relative path would collide with the same filename in another pack
+
+**Example:**
+
+```python
+from pathlib import Path
+from tres_generator import stamp_resource_uids
+
+stamped = stamp_resource_uids(
+    Path("output/POLYGON_Dungeon"),
+    project_root=Path("output"),
+)
+print(f"Gave {stamped} resources a UID")
+```
+
+---
+
 ## Auto-Enable Rules
 
 The generator automatically enables certain shader features when corresponding textures are present. This ensures proper rendering without requiring manual configuration.
@@ -356,7 +423,7 @@ class MappedMaterial:
 ### Output: .tres Content
 
 ```tres
-[gd_resource type="ShaderMaterial" load_steps=4 format=3]
+[gd_resource type="ShaderMaterial" load_steps=4 format=3 uid="uid://dtw1bypimep"]
 
 [ext_resource type="Shader" path="res://shaders/foliage.gdshader" id="1"]
 [ext_resource type="Texture2D" path="res://textures/Fern_1.tga" id="2"]

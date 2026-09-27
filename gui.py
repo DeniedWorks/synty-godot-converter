@@ -14,6 +14,7 @@ Requirements:
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
 import os
@@ -42,6 +43,7 @@ script_dir = Path(__file__).parent
 sys.path.insert(0, str(script_dir))
 
 from converter import ConversionConfig, ConversionStats, run_conversion
+from synty_library import convert_library
 
 
 # --- Constants ---
@@ -103,6 +105,23 @@ ADVANCED (Row 2):
 - HQ Textures: Use BPTC compression (slower import, better quality)
   Default uses lossless compression for faster Godot import times.
 - Timeout: How long to wait for Godot operations
+
+CONVERT LIBRARY:
+Converts every .unitypackage in a folder into one Godot project, deciding
+per pack how to convert it. Fill in Packages Folder, Output Directory and
+Godot Executable, then press Convert Library; the other fields above are
+for single-pack conversion and are ignored, except Filter by Name, which
+narrows the run to matching packages, and Dry Run, which prints the
+routing without converting.
+
+No Unity install is needed - each pack's meshes are read straight out of
+its .unitypackage. Animation packs convert first so later characters can
+bind their clips, rigs are retargeted so those clips hold, and a pack
+whose output folder already exists is skipped, so an interrupted run
+resumes where it stopped. Converting a SIDEKICK pack also installs the
+addons/synty_sidekick/ runtime for building modular characters in game.
+
+Per-pack logs land in conversion_logs/ under the output directory.
 """
 
 
@@ -322,6 +341,32 @@ class SyntyConverterApp:
             )
         )
         godot_browse.grid(row=row, column=2, pady=4)
+
+        # The library mode's only extra input; it shares the output directory,
+        # Godot executable and timeout above.
+        row += 1
+        packages_label = ctk.CTkLabel(
+            paths_frame, text="Packages Folder:", anchor="w", width=120
+        )
+        packages_label.grid(row=row, column=0, sticky="w", pady=4)
+
+        self.packages_dir_var = ctk.StringVar()
+        packages_entry = ctk.CTkEntry(
+            paths_frame,
+            textvariable=self.packages_dir_var,
+            placeholder_text="Optional - for Convert Library",
+            placeholder_text_color="gray",
+        )
+        packages_entry.grid(row=row, column=1, sticky="ew", padx=5, pady=4)
+
+        packages_browse = ctk.CTkButton(
+            paths_frame, text="...", width=35,
+            command=lambda: self._browse_directory(
+                self.packages_dir_var,
+                "Select Folder of .unitypackage Files"
+            )
+        )
+        packages_browse.grid(row=row, column=2, pady=4)
 
     def _create_output_options(self, parent):
         """Create the output format and mesh mode segmented buttons."""
@@ -654,6 +699,18 @@ class SyntyConverterApp:
         btn_frame = ctk.CTkFrame(progress_frame, fg_color="transparent")
         btn_frame.pack(side="right")
 
+        self.library_btn = ctk.CTkButton(
+            btn_frame,
+            text="Convert Library",
+            font=ctk.CTkFont(size=14),
+            width=130,
+            height=36,
+            fg_color="transparent",
+            border_width=1,
+            command=self._start_library_conversion
+        )
+        self.library_btn.pack(side="left", padx=5)
+
         self.convert_btn = ctk.CTkButton(
             btn_frame,
             text="Convert",
@@ -857,6 +914,8 @@ class SyntyConverterApp:
                     self.output_dir_var.set(settings["output_dir"])
                 if "godot_exe" in settings:
                     self.godot_exe_var.set(settings["godot_exe"])
+                if "packages_dir" in settings:
+                    self.packages_dir_var.set(settings["packages_dir"])
 
                 # Restore options
                 if "output_format" in settings:
@@ -907,6 +966,7 @@ class SyntyConverterApp:
             "source_files": self.source_files_var.get(),
             "output_dir": self.output_dir_var.get(),
             "godot_exe": self.godot_exe_var.get(),
+            "packages_dir": self.packages_dir_var.get(),
             # Options
             "output_format": self.format_selector.get(),
             "mesh_mode": self.mesh_mode_selector.get(),
@@ -1030,6 +1090,109 @@ class SyntyConverterApp:
         self._log_message(f"Mesh output: meshes/{mesh_format}_{mesh_mode}/")
         self._log_message("=" * 40)
 
+    def _start_library_conversion(self):
+        """Convert a whole folder of packages into one Godot project.
+
+        The single-pack flow above is untouched. This mode shares its output
+        directory, Godot executable and timeout, and adds only the packages
+        folder - everything else it decides per pack.
+        """
+        self._save_settings()
+
+        packages = self.packages_dir_var.get()
+        if not packages or not Path(packages).is_dir():
+            messagebox.showerror(
+                "Packages Folder Required",
+                "Choose the folder holding your .unitypackage files."
+            )
+            return
+        godot = self.godot_exe_var.get()
+        if not godot or not Path(godot).exists():
+            messagebox.showerror(
+                "Godot Executable Required",
+                "A library conversion runs Godot for every pack."
+            )
+            return
+        output = self.output_dir_var.get()
+        if not output:
+            messagebox.showerror("Output Directory Required", "Choose where to build the project.")
+            return
+
+        args = argparse.Namespace(
+            packages=Path(packages),
+            output=Path(output),
+            godot=Path(godot),
+            unity_assets=None,
+            work_dir=None,
+            # On here as on the command line: a library built for the first
+            # time has no existing bone names to protect.
+            retarget=True,
+            godot_timeout=self.timeout_var.get(),
+            force=False,
+            only=self.filter_var.get() or None,
+            dry_run=self.dry_run_var.get(),
+        )
+
+        self.convert_btn.configure(state="disabled")
+        self.library_btn.configure(state="disabled")
+        self.progress_bar.set(0)
+        self.progress_bar.configure(mode="indeterminate")
+        self.progress_bar.start()
+        self.progress_label.configure(text="Converting library...")
+        self.conversion_cancelled.clear()
+
+        self.conversion_thread = threading.Thread(
+            target=self._run_library_thread,
+            args=(args,),
+            daemon=True
+        )
+        self.conversion_thread.start()
+
+        self._log_message("=" * 40)
+        self._log_message(f"Converting library: {packages}")
+        self._log_message("=" * 40)
+
+    def _run_library_thread(self, args: argparse.Namespace):
+        """Run the library conversion in a background thread."""
+        try:
+            # Progress goes through the same queue the logging handler uses,
+            # drained on the main thread. tkinter widgets belong to that thread;
+            # calling root.after() per line from here raises "main thread is not
+            # in main loop" and kills the conversion silently.
+            def report(line: str) -> None:
+                for part in str(line).split("\n"):
+                    if part.strip():
+                        self.log_queue.put(part)
+
+            logging.getLogger().setLevel(logging.INFO)
+            code = convert_library(args, report=report)
+            self.root.after(0, self._library_complete, code, None)
+        except Exception as e:
+            self.root.after(0, self._library_complete, 1, str(e))
+
+    def _library_complete(self, code: int, error: str | None):
+        """Handle library conversion completion on the main thread."""
+        self.convert_btn.configure(state="normal")
+        self.library_btn.configure(state="normal")
+        self.progress_bar.stop()
+        self.progress_bar.configure(mode="determinate")
+        self.progress_bar.set(1.0 if code == 0 and not error else 0)
+
+        if error:
+            self.progress_label.configure(text="Library conversion failed!")
+            self._log_message(f"ERROR: {error}", level="ERROR")
+            messagebox.showerror("Library Conversion Failed", error)
+            return
+
+        if code == 0:
+            self.progress_label.configure(text="Library conversion complete!")
+        else:
+            self.progress_label.configure(text="Library conversion finished with failures")
+            self._log_message(
+                "Some packs failed - see the per-pack logs under conversion_logs/",
+                level="WARNING",
+            )
+
     def _run_conversion_thread(self, config: ConversionConfig):
         """Run the conversion in a background thread."""
         try:
@@ -1054,6 +1217,7 @@ class SyntyConverterApp:
         """Handle conversion completion on the main thread."""
         # Reset UI state
         self.convert_btn.configure(state="normal")
+        self.library_btn.configure(state="normal")
         self.progress_bar.stop()
         self.progress_bar.configure(mode="determinate")
         self.progress_bar.set(1.0 if not error else 0)

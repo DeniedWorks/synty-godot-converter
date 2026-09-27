@@ -52,15 +52,52 @@ from pathlib import Path
 from unity_package import extract_unitypackage, GuidMap, get_material_guids, get_material_name
 from unity_parser import parse_material_bytes, UnityMaterial
 from shader_mapping import map_material, detect_shader_type, determine_shader, MappedMaterial
-from tres_generator import generate_tres, write_tres_file, sanitize_filename
+from tres_generator import (
+    generate_tres,
+    sanitize_filename,
+    stamp_resource_uids,
+    write_tres_file,
+)
 from material_list import (
     parse_material_list,
     generate_mesh_material_mapping_json,
     get_custom_shader_materials,
     PrefabMaterials,
 )
+from retarget import inject_subresources, render_bone_map, resolve_bone_map
+from prefab_parser import (
+    build_fbx_material_fallback,
+    build_prefabs_from_package,
+    build_character_definitions,
+    write_character_definitions_json,
+)
+from sidekick import (
+    SIDEKICK_PARTS_DIRNAME,
+    build_sidekick_recipes,
+    derive_gear_sets_from_names,
+    find_master_color_map,
+    find_sidekick_database,
+    load_color_tables,
+    load_part_presets,
+    load_rig_adjustments,
+    write_sidekick_characters_json,
+    write_sidekick_colors_json,
+    write_sidekick_gear_sets_json,
+    write_sidekick_rig_adjustments_json,
+)
 
 logger = logging.getLogger(__name__)
+
+# Records which metadata schema a converted pack was written against, so an
+# existing pack converted by an earlier version refreshes its metadata instead
+# of skipping ahead forever with whatever fields that version happened to emit.
+# Bump this whenever the shape *or the content* of mesh_material_mapping.json,
+# fbx_material_fallback.json, character_definitions.json,
+# sidekick_characters.json or sidekick_rig_adjustments.json changes. A fix that derives more than the last
+# version did is exactly as stale to an existing pack as a renamed field: the
+# pack skips straight to mesh generation and keeps the thinner mapping forever.
+PACK_METADATA_FILENAME = "pack_metadata.json"
+PACK_METADATA_VERSION = 8
 
 
 def has_source_assets_recursive(path: Path) -> bool:
@@ -296,9 +333,11 @@ def extract_pack_name_from_package(unity_package_path: Path) -> str:
     # Get filename without extension
     filename = unity_package_path.stem
 
-    # Pattern to match "_Unity_YYYY_V" suffix (e.g., "_Unity_2022_3")
-    # This captures everything before the Unity version marker
-    unity_pattern = re.compile(r'^(.+?)_Unity_\d{4}_\d+.*$', re.IGNORECASE)
+    # Pattern to match "_Unity_YYYY_V" suffix (e.g., "_Unity_2022_3").
+    # The minor version is optional: Goblin War Camp ships as
+    # "_Unity_2021_v1_0_2_Unity", and requiring it left "_Unity_2021" glued to
+    # the pack name, which then matched no Unity import folder.
+    unity_pattern = re.compile(r'^(.+?)_Unity_\d{4}(?:_\d+)?.*$', re.IGNORECASE)
     match = unity_pattern.match(filename)
 
     if match:
@@ -336,8 +375,13 @@ class ConversionConfig:
         verbose: If True, enable DEBUG logging level for detailed output.
         skip_fbx_copy: If True, skip copying FBX files from SourceFiles/FBX.
             Use this if the models/ directory is already populated.
+        prune_models: If True, delete the pack's models/ directory after a
+            successful conversion. The FBX are staging input, not output.
         skip_godot_cli: If True, skip Godot CLI conversion phase. This generates
             materials only without producing .tscn scene files.
+        retarget: If True, rewrite Polygon character and clip rigs onto
+            SkeletonProfileHumanoid so animation clips can bind. Costs a second
+            import pass.
         skip_godot_import: If True, skip Godot's headless import step but still
             run the GDScript converter. Useful for large projects where the
             import step times out. You'll need to open the project in Godot
@@ -355,6 +399,12 @@ class ConversionConfig:
         output_subfolder: Optional subfolder path to prepend to pack folder names.
             For example, "synty/" creates packs at output/synty/POLYGON_PackName/
             instead of output/POLYGON_PackName/.
+        animations: Animation libraries to bind to converted characters.
+            None binds nothing, 'all' binds every library in animations/,
+            or a comma-separated list of case-insensitive substrings.
+        pack_type: Package kind - 'auto' (default, detected from content),
+            'assets' (materials, textures and meshes), or 'animations'
+            (clip FBX converted to AnimationLibrary resources).
         flatten_output: If True (default), skip mirroring the Source_Files/FBX/
             subdirectory structure when creating mesh files. All meshes go directly
             into meshes/tscn_separate/ instead of preserving source paths. Set to
@@ -379,7 +429,9 @@ class ConversionConfig:
     verbose: bool = False
     skip_fbx_copy: bool = False
     skip_godot_cli: bool = False
+    prune_models: bool = False
     skip_godot_import: bool = False
+    retarget: bool = False
     godot_timeout: int = 600
     keep_meshes_together: bool = False
     mesh_format: str = "tscn"
@@ -388,6 +440,96 @@ class ConversionConfig:
     mesh_scale: float = 1.0
     output_subfolder: str | None = None
     flatten_output: bool = True
+    pack_type: str = "auto"
+    animations: str | None = None
+    sidekick_database: Path | None = None
+
+
+@dataclass
+class GodotRunReport:
+    """What godot_converter.gd reported about its own run.
+
+    Everything the Godot script prints goes to a pipe that run_godot_cli()
+    logs at debug level, so on a normal run none of it reaches the user. The
+    script therefore ends with a machine-readable ``GODOT_SUMMARY <json>``
+    line, and this holds what that line said.
+
+    Attributes:
+        seen: True if the GODOT_SUMMARY line was found. When False every count
+            below is zero because nothing was parsed, not because nothing
+            happened - so do not report them.
+        meshes_saved: Meshes written by the Godot script.
+        meshes_skipped: Meshes skipped (null mesh, no surfaces).
+        characters_saved: Rigged character scenes written.
+        animations_bound: Characters that got an animation library bound.
+        errors: Errors counted by the Godot script.
+        warnings: Warnings counted by the Godot script.
+        messages: Up to MAX_GODOT_MESSAGES error and warning texts, reported by
+            the Godot script itself rather than scraped from its console
+            output. Scraping cannot work: the engine's own messages are worded
+            exactly like the script's, so a text match quotes engine noise as
+            though it were one of the counts above.
+    """
+
+    seen: bool = False
+    meshes_saved: int = 0
+    meshes_skipped: int = 0
+    characters_saved: int = 0
+    animations_bound: int = 0
+    errors: int = 0
+    warnings: int = 0
+    messages: list[str] = field(default_factory=list)
+
+
+# Cap on message examples accepted from the Godot script, mirroring its own
+# MAX_REPORTED_MESSAGES. Enforced here too: the summary line is parsed input,
+# not something to trust for length.
+MAX_GODOT_MESSAGES = 25
+
+
+def parse_godot_summary(line: str, report: GodotRunReport) -> bool:
+    """Fill `report` from a GODOT_SUMMARY line.
+
+    Args:
+        line: A single line of Godot output.
+        report: Report to populate in place.
+
+    Returns:
+        True if the line was a well-formed GODOT_SUMMARY line.
+    """
+    stripped = line.strip()
+    if not stripped.startswith("GODOT_SUMMARY "):
+        return False
+
+    try:
+        data = json.loads(stripped[len("GODOT_SUMMARY ") :])
+    except (json.JSONDecodeError, ValueError):
+        logger.debug("Malformed GODOT_SUMMARY line: %s", stripped)
+        return False
+    if not isinstance(data, dict):
+        return False
+
+    for name in (
+        "meshes_saved",
+        "meshes_skipped",
+        "characters_saved",
+        "animations_bound",
+        "errors",
+        "warnings",
+    ):
+        value = data.get(name, 0)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        setattr(report, name, int(value))
+
+    messages = data.get("messages")
+    if isinstance(messages, list):
+        report.messages = [
+            str(message) for message in messages[:MAX_GODOT_MESSAGES]
+        ]
+
+    report.seen = True
+    return True
 
 
 @dataclass
@@ -455,6 +597,7 @@ class ConversionStats:
     godot_timeout_occurred: bool = False
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    godot_report: GodotRunReport = field(default_factory=lambda: GodotRunReport())
 
 
 def parse_args() -> ConversionConfig:
@@ -531,6 +674,15 @@ Examples:
         help="Skip running Godot CLI (generates materials only, no .tscn scene files)",
     )
     parser.add_argument(
+        "--prune-models",
+        action="store_true",
+        help=(
+            "Delete the pack's models/ directory once meshes are generated. "
+            "The FBX are input only - generated scenes embed their mesh data - "
+            "so this reclaims the staging copy. Skipped if conversion failed."
+        ),
+    )
+    parser.add_argument(
         "--skip-godot-import",
         action="store_true",
         help="Skip Godot's headless import step (useful for large projects that timeout). "
@@ -582,6 +734,27 @@ Examples:
              "Example: --output-subfolder synty/ creates packs at output/synty/POLYGON_PackName/",
     )
     parser.add_argument(
+        "--animations",
+        default=None,
+        help=(
+            "Bind animation libraries to converted characters. "
+            "'all', or a comma-separated list of substrings "
+            "(e.g. 'sword_combat,base_locomotion')."
+        ),
+    )
+    parser.add_argument(
+        "--retarget",
+        action="store_true",
+        help="Retarget Polygon character and clip rigs onto SkeletonProfileHumanoid "
+             "so animation clips bind. Adds a second import pass.",
+    )
+    parser.add_argument(
+        "--pack-type",
+        choices=["auto", "assets", "animations"],
+        default="auto",
+        help="Package kind. Default 'auto' detects from content.",
+    )
+    parser.add_argument(
         "--retain-subfolders",
         action="store_true",
         help="Retain Source_Files/FBX/ subdirectory structure in mesh output. "
@@ -631,7 +804,9 @@ Examples:
         verbose=args.verbose,
         skip_fbx_copy=args.skip_fbx_copy,
         skip_godot_cli=args.skip_godot_cli,
+        prune_models=args.prune_models,
         skip_godot_import=args.skip_godot_import,
+        retarget=args.retarget,
         godot_timeout=args.godot_timeout,
         keep_meshes_together=args.keep_meshes_together,
         mesh_format=args.mesh_format,
@@ -640,7 +815,131 @@ Examples:
         mesh_scale=args.mesh_scale,
         output_subfolder=args.output_subfolder,
         flatten_output=not args.retain_subfolders,
+        pack_type=args.pack_type,
+        animations=args.animations,
     )
+
+
+def write_pack_metadata(pack_output_dir: Path) -> None:
+    """Stamp a pack with the metadata schema it was converted against.
+
+    Args:
+        pack_output_dir: Pack output directory.
+    """
+    (pack_output_dir / PACK_METADATA_FILENAME).write_text(
+        json.dumps({"schema_version": PACK_METADATA_VERSION}, indent=2),
+        encoding="utf-8",
+    )
+
+
+def pack_metadata_is_current(pack_output_dir: Path) -> bool:
+    """Check whether a pack's metadata was written by this schema or later.
+
+    A pack converted before a metadata change carries an older stamp, or none
+    at all, and must have its metadata regenerated - otherwise the skip-ahead
+    path leaves it permanently missing whatever the converter learned to emit
+    since. A newer stamp is left alone rather than downgraded.
+
+    Args:
+        pack_output_dir: Pack output directory.
+
+    Returns:
+        True when the pack's metadata is at least as new as this converter's.
+    """
+    metadata_path = pack_output_dir / PACK_METADATA_FILENAME
+    if not metadata_path.exists():
+        return False
+    try:
+        payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+        return int(payload["schema_version"]) >= PACK_METADATA_VERSION
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError, OSError) as e:
+        logger.debug("Unreadable pack metadata at %s: %s", metadata_path, e)
+        return False
+
+
+def should_prune_models(stats: "ConversionStats") -> bool:
+    """Decide whether a pack's staging FBX can be discarded.
+
+    Only ever after mesh generation actually produced something: pruning a
+    failed run would delete the very inputs needed to retry it. A non-zero exit
+    from the Godot script is tolerated when meshes still came out, matching how
+    the caller treats a partial conversion as a success.
+
+    Args:
+        stats: Conversion statistics for the finished pack.
+
+    Returns:
+        True when pruning is safe.
+    """
+    if stats.errors or stats.godot_timeout_occurred:
+        return False
+    if not stats.godot_import_success:
+        return False
+    return stats.meshes_converted > 0
+
+
+def prune_pack_models(pack_output_dir: Path, dry_run: bool = False) -> int:
+    """Delete a pack's staging FBX, keeping everything else in models/.
+
+    The FBX are input: generated scenes embed their mesh data, so nothing
+    points at one once conversion is done. On a shared source pool they are
+    also the same bytes in every pack.
+
+    The rest of models/ must stay. Godot's FBX importer extracts a mesh's
+    embedded textures as PNGs beside it, and the generated scenes reference
+    those by path - deleting the directory wholesale leaves 200+ scenes per
+    pack unable to load. The FBX are the bulk of it regardless: 352 MB against
+    15 MB of extracted textures on a Sidekick pack.
+
+    Pruning is self-healing: the next run finds no FBX under models/, so it
+    takes the full path and re-copies them rather than attempting a metadata
+    refresh against an empty pool.
+
+    Args:
+        pack_output_dir: Pack output directory.
+        dry_run: If True, only log what would be removed.
+
+    Returns:
+        Number of FBX removed.
+    """
+    models_dir = pack_output_dir / "models"
+    if not models_dir.is_dir():
+        return 0
+
+    fbx_files = sorted(models_dir.rglob("*.fbx"))
+    if not fbx_files:
+        return 0
+
+    if dry_run:
+        logger.info("[DRY RUN] Would prune %d FBX from %s", len(fbx_files), models_dir)
+        return 0
+
+    removed = 0
+    for fbx_path in fbx_files:
+        try:
+            fbx_path.unlink()
+            # The .import sidecar describes a source that no longer exists.
+            sidecar = fbx_path.with_suffix(fbx_path.suffix + ".import")
+            if sidecar.exists():
+                sidecar.unlink()
+            removed += 1
+        except OSError as e:
+            logger.warning("Could not prune %s: %s", fbx_path, e)
+
+    # Tidy directories the FBX left behind, deepest first so parents empty out.
+    for directory in sorted(
+        (p for p in models_dir.rglob("*") if p.is_dir()),
+        key=lambda p: len(p.parts),
+        reverse=True,
+    ):
+        try:
+            directory.rmdir()
+        except OSError:
+            # Still holds extracted textures, which the scenes reference.
+            pass
+
+    logger.info("Pruned %d staging FBX from %s", removed, models_dir)
+    return removed
 
 
 def detect_existing_pack(pack_output_dir: Path) -> dict:
@@ -651,8 +950,10 @@ def detect_existing_pack(pack_output_dir: Path) -> dict:
     - has_textures: True if textures/ has files
     - has_models: True if models/**/*.fbx files exist
     - has_mapping: True if mesh_material_mapping.json exists
+    - has_current_metadata: True if the pack's metadata matches this schema
     """
     return {
+        "has_current_metadata": pack_metadata_is_current(pack_output_dir),
         "has_materials": bool(list((pack_output_dir / "materials").glob("*.tres"))) if (pack_output_dir / "materials").exists() else False,
         "has_textures": bool(list((pack_output_dir / "textures").glob("*.*"))) if (pack_output_dir / "textures").exists() else False,
         "has_models": bool(list((pack_output_dir / "models").rglob("*.fbx"))) if (pack_output_dir / "models").exists() else False,
@@ -1274,6 +1575,9 @@ def generate_converter_config(
     output_subfolder: str | None,
     flatten_output: bool,
     dry_run: bool,
+    mode: str = "assets",
+    animation_libraries: list[str] | None = None,
+    rig_report: bool = False,
 ) -> None:
     """Generate converter_config.json for Godot's godot_converter.gd script.
 
@@ -1294,6 +1598,10 @@ def generate_converter_config(
         output_subfolder: Optional subfolder path prepended to pack folder names.
         flatten_output: If True, skip mirroring source directory structure.
         dry_run: If True, only log what would be written.
+        mode: 'assets' to convert meshes, 'animations' to build
+            AnimationLibrary resources from clip FBX.
+        animation_libraries: res:// paths of AnimationLibrary resources to bind
+            to character scenes.
     """
     config = {
         "pack_name": pack_name,
@@ -1303,6 +1611,9 @@ def generate_converter_config(
         "mesh_scale": mesh_scale,
         "output_subfolder": output_subfolder,
         "flatten_output": flatten_output,
+        "mode": mode,
+        "animation_libraries": animation_libraries or [],
+        "rig_report": rig_report,
     }
 
     config_path = project_dir / "converter_config.json"
@@ -1312,6 +1623,104 @@ def generate_converter_config(
     else:
         config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
         logger.debug("Wrote converter_config.json: %s", config)
+
+
+def _run_godot_quietly(
+    godot_exe: Path, project_dir: Path, timeout_seconds: int, *args: str
+) -> bool:
+    """Runs Godot and reports only whether it succeeded.
+
+    The main import and convert phases stream their output because they are long
+    and their progress is worth watching. The retargeting passes are neither, and
+    a second copy of the streaming reader would be the more fragile thing here.
+    """
+    command = [str(godot_exe), "--headless", *args, "--path", str(project_dir)]
+    logger.debug("Running: %s", " ".join(command))
+    try:
+        result = subprocess.run(
+            command, capture_output=True, text=True, timeout=timeout_seconds,
+            cwd=str(project_dir), check=False,
+        )
+    except subprocess.TimeoutExpired:
+        logger.error("Godot timed out after %ds: %s", timeout_seconds, " ".join(args))
+        return False
+    except Exception as error:  # noqa: BLE001 - reported, never fatal
+        logger.error("Failed to run Godot: %s", error)
+        return False
+    for line in (result.stdout or "").splitlines():
+        logger.debug(line)
+    if result.returncode != 0:
+        logger.error("Godot exited %d: %s", result.returncode, " ".join(args))
+        return False
+    return True
+
+
+def apply_retargeting(project_dir: Path) -> int:
+    """Writes bone maps and injects them into .import files, between import passes.
+
+    Reads the rig report the Godot side wrote, resolves the Polygon bone-map
+    template against each skeleton's real bone names, and points that file's
+    .import at the result.
+
+    Returns:
+        Number of FBX prepared. Zero means nothing was retargeted, and the caller
+        should skip the second import rather than pay for a no-op.
+    """
+    report_path = project_dir / "rig_report.json"
+    if not report_path.exists():
+        logger.warning("Retargeting skipped: no rig report at %s", report_path)
+        return 0
+
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        logger.warning("Retargeting skipped: cannot read rig report: %s", error)
+        return 0
+
+    prepared = 0
+    for res_path, entry in report.items():
+        bones = {name: tuple(origin) for name, origin in entry.get("bones", {}).items()}
+        resolved, unresolved = resolve_bone_map(bones)
+        if unresolved:
+            # Not every skinned thing is a humanoid - capes and tails come
+            # through here too. Report and leave it to the unretargeted path.
+            logger.debug(
+                "No bone map for %s: %d profile bones unresolved (%s)",
+                res_path, len(unresolved), ", ".join(unresolved[:6]))
+            continue
+
+        fbx_path = project_dir / res_path.removeprefix("res://")
+        if not fbx_path.exists():
+            logger.warning("Rig report names a missing file: %s", fbx_path)
+            continue
+
+        bone_map_path = fbx_path.with_suffix(".bonemap.tres")
+        bone_map_path.write_text(render_bone_map(resolved), encoding="utf-8")
+        bone_map_res = "res://" + bone_map_path.relative_to(
+            project_dir).as_posix()
+
+        import_path = fbx_path.with_suffix(fbx_path.suffix + ".import")
+        if not import_path.exists():
+            logger.warning("No .import for %s; was it imported?", fbx_path.name)
+            continue
+        try:
+            if inject_subresources(import_path, bone_map_res):
+                prepared += 1
+            else:
+                logger.warning(
+                    "%s already carries retarget options; left alone",
+                    import_path.name)
+        except (ValueError, OSError) as error:
+            logger.warning("Retargeting skipped for %s: %s", import_path.name, error)
+
+    # Consume it: a report left behind describes the previous pack.
+    try:
+        report_path.unlink()
+    except OSError as error:
+        logger.debug("Could not remove %s: %s", report_path, error)
+
+    logger.info("Retargeting: prepared %d of %d skeletons", prepared, len(report))
+    return prepared
 
 
 def run_godot_cli(
@@ -1327,7 +1736,10 @@ def run_godot_cli(
     pack_name: str = "",
     output_subfolder: str | None = None,
     flatten_output: bool = True,
-) -> tuple[bool, bool, bool]:
+    mode: str = "assets",
+    animation_libraries: list[str] | None = None,
+    retarget: bool = False,
+) -> tuple[bool, bool, bool, GodotRunReport]:
     """Run Godot CLI in two phases: import and convert.
 
     This function orchestrates the Godot CLI operations needed to import
@@ -1376,12 +1788,15 @@ def run_godot_cli(
           if Phase 1 was skipped via skip_import
         - convert_success: True if Phase 2 completed with exit code 0
         - timeout_occurred: True if either phase exceeded the timeout
+        - report: GodotRunReport of what godot_converter.gd said about its own
+          run. Its `seen` flag is False when the run never reached the
+          converter script.
 
     Raises:
         No exceptions are raised; errors are logged and reflected in return values.
 
     Example:
-        >>> import_ok, convert_ok, timed_out = run_godot_cli(
+        >>> import_ok, convert_ok, timed_out, report = run_godot_cli(
         ...     Path("C:/Godot/Godot.exe"),
         ...     Path("output"),
         ...     timeout_seconds=300,
@@ -1392,12 +1807,12 @@ def run_godot_cli(
     """
     if not godot_exe.exists():
         logger.error("Godot executable not found: %s", godot_exe)
-        return False, False, False
+        return False, False, False, GodotRunReport()
 
     project_godot = project_dir / "project.godot"
     if not project_godot.exists():
         logger.error("project.godot not found in: %s", project_dir)
-        return False, False, False
+        return False, False, False, GodotRunReport()
 
     # Copy godot_converter.gd to project directory
     script_dir = Path(__file__).parent
@@ -1423,11 +1838,14 @@ def run_godot_cli(
         output_subfolder,
         flatten_output,
         dry_run,
+        mode=mode,
+        animation_libraries=animation_libraries,
     )
 
     import_success = False
     convert_success = False
     timeout_occurred = False
+    report = GodotRunReport()
 
     # Phase 1: Import (can be skipped for large projects that timeout)
     if skip_import:
@@ -1491,17 +1909,49 @@ def run_godot_cli(
                     process.kill()
                     logger.error("Godot import timed out after %ds", timeout_seconds)
                     timeout_occurred = True
-                    return import_success, convert_success, timeout_occurred
+                    return import_success, convert_success, timeout_occurred, report
                 finally:
                     if process.stdout:
                         process.stdout.close()
 
             except Exception as e:
                 logger.error("Failed to run Godot import: %s", e)
-                return import_success, convert_success, timeout_occurred
+                return import_success, convert_success, timeout_occurred, report
 
         if not import_success and not dry_run:
-            return import_success, convert_success, timeout_occurred
+            return import_success, convert_success, timeout_occurred, report
+
+    # Phase 1.5: Retarget. Both a character rig and the clip rigs have to be
+    # rewritten onto a common profile before anything can bind, and a bone map
+    # cannot be written until the file's real bone names are known - so this sits
+    # between two imports rather than before one.
+    if retarget and import_success and not dry_run:
+        logger.info("Retargeting: reporting rigs...")
+        generate_converter_config(
+            project_dir, pack_name, keep_meshes_together, mesh_format,
+            filter_pattern, mesh_scale, output_subfolder, flatten_output,
+            dry_run, mode=mode, animation_libraries=animation_libraries,
+            rig_report=True,
+        )
+        if _run_godot_quietly(godot_exe, project_dir, timeout_seconds,
+                              "--script", "res://godot_converter.gd"):
+            prepared = apply_retargeting(project_dir)
+            if prepared:
+                logger.info("Retargeting: re-importing %d retargeted FBX...", prepared)
+                if not _run_godot_quietly(godot_exe, project_dir, timeout_seconds,
+                                          "--import"):
+                    # Pass 1's output is still on disk and still valid; the pack
+                    # converts unretargeted rather than half-retargeted.
+                    logger.warning("Re-import failed; converting without retargeting")
+        else:
+            logger.warning("Rig report failed; converting without retargeting")
+
+        # Put the config back before the conversion phase reads it.
+        generate_converter_config(
+            project_dir, pack_name, keep_meshes_together, mesh_format,
+            filter_pattern, mesh_scale, output_subfolder, flatten_output,
+            dry_run, mode=mode, animation_libraries=animation_libraries,
+        )
 
     # Phase 2: Convert
     convert_cmd = [
@@ -1535,6 +1985,9 @@ def run_godot_cli(
                 for line in process.stdout:
                     line = line.rstrip()
                     if line:
+                        if parse_godot_summary(line, report):
+                            logger.debug(line)
+                            continue
                         if "[" in line and "Processing:" in line:
                             # Extract [X/Y] from the processing line for compact display
                             # Pattern: "[1/830] Processing: Character_Ghost_01.fbx"
@@ -1571,7 +2024,7 @@ def run_godot_cli(
         except Exception as e:
             logger.error("Failed to run Godot converter: %s", e)
 
-    return import_success, convert_success, timeout_occurred
+    return import_success, convert_success, timeout_occurred, report
 
 
 def count_mesh_files(meshes_dir: Path, mesh_format: str = "tscn") -> int:
@@ -1823,6 +2276,28 @@ def write_conversion_log(project_dir: Path, pack_name: str, stats: ConversionSta
         "",
     ]
 
+    # The Godot script's own tally, which is independent of the Python one
+    # above: the pipeline can succeed while the converter script fails on
+    # individual meshes or characters.
+    report = stats.godot_report
+    if report.seen:
+        lines.extend(
+            [
+                "Godot Converter Script:",
+                f"  Meshes Saved: {report.meshes_saved}",
+                f"  Meshes Skipped: {report.meshes_skipped}",
+                f"  Characters Rigged: {report.characters_saved}",
+                f"  Animations Bound: {report.animations_bound}",
+                f"  Warnings: {report.warnings}",
+                f"  Errors: {report.errors}",
+                "",
+            ]
+        )
+        if report.messages:
+            lines.append("Godot Messages:")
+            lines.extend(f"  - {message}" for message in report.messages)
+            lines.append("")
+
     if stats.warnings:
         lines.append(f"Warnings ({len(stats.warnings)}):")
         for warning in stats.warnings:
@@ -1873,6 +2348,22 @@ def print_summary(stats: ConversionStats) -> None:
     elif not stats.godot_convert_success and stats.meshes_converted == 0:
         print("  Godot CLI: Conversion Failed")
 
+    # What the Godot script reported about itself. Its errors are counted
+    # separately from the Python pipeline's: a run can finish with Python
+    # reporting nothing wrong while Godot failed on dozens of meshes.
+    report = stats.godot_report
+    if report.seen:
+        if report.characters_saved:
+            print(f"  Characters: {report.characters_saved} rigged")
+        if report.animations_bound:
+            print(f"  Animations bound: {report.animations_bound}")
+        if report.meshes_skipped:
+            print(f"  Meshes Skipped (Godot): {report.meshes_skipped}")
+        if report.warnings:
+            print(f"  Godot Warnings: {report.warnings}")
+        if report.errors:
+            print(f"  Godot Errors: {report.errors}")
+
     if stats.warnings:
         print(f"  Warnings: {len(stats.warnings)}")
 
@@ -1882,6 +2373,14 @@ def print_summary(stats: ConversionStats) -> None:
             print(f"    - {error}")
         if len(stats.errors) > 5:
             print(f"    ... and {len(stats.errors) - 5} more")
+
+    if report.messages and (report.errors or report.warnings):
+        print("  From Godot:")
+        for message in report.messages[:5]:
+            print(f"    - {message}")
+        remaining = (report.errors + report.warnings) - 5
+        if remaining > 0:
+            print(f"    ... and {remaining} more (run with --verbose for all)")
 
     print()  # Empty line at end
 
@@ -2010,6 +2509,68 @@ def filter_textures_for_materials(
     return filtered_textures
 
 
+# Fraction of FBX under an Animations/ directory above which a package is
+# treated as an animation pack. Measured: ANIMATION_Sword_Combat 242/244 = 0.99,
+# POLYGON_Dungeon 0/801 = 0.00, so the separation needs no tuning.
+ANIMATION_PACK_FBX_RATIO = 0.5
+
+
+def detect_pack_type(guid_map) -> str:
+    """Classify a package as an asset pack or an animation pack.
+
+    Args:
+        guid_map: unity_package.GuidMap with guid_to_pathname populated.
+
+    Returns:
+        "animations" or "assets".
+    """
+    fbx_paths = [
+        p for p in guid_map.guid_to_pathname.values() if p.lower().endswith(".fbx")
+    ]
+    if not fbx_paths:
+        return "assets"
+
+    in_animations = sum(1 for p in fbx_paths if "/animations/" in p.lower())
+    ratio = in_animations / len(fbx_paths)
+    logger.debug(
+        "Pack type: %d/%d FBX under Animations/ (ratio %.2f)",
+        in_animations,
+        len(fbx_paths),
+        ratio,
+    )
+    return "animations" if ratio > ANIMATION_PACK_FBX_RATIO else "assets"
+
+
+def resolve_animation_libraries(project_dir: Path, selector: str | None) -> list[str]:
+    """Resolve --animations selectors to res:// library paths.
+
+    Args:
+        project_dir: Godot project root; libraries live in animations/.
+        selector: None (bind nothing), "all", or a comma-separated list of
+            case-insensitive substrings matched against library filenames.
+
+    Returns:
+        Sorted res:// paths. Empty when nothing matches; the caller warns.
+    """
+    if not selector:
+        return []
+
+    animations_dir = project_dir / "animations"
+    if not animations_dir.is_dir():
+        return []
+
+    libraries = sorted(p.name for p in animations_dir.glob("*.res"))
+    if selector.strip().lower() == "all":
+        matched = libraries
+    else:
+        needles = [s.strip().lower() for s in selector.split(",") if s.strip()]
+        matched = [
+            name for name in libraries if any(n in name.lower() for n in needles)
+        ]
+
+    return [f"res://animations/{name}" for name in matched]
+
+
 def run_conversion(config: ConversionConfig) -> ConversionStats:
     """Execute the full conversion pipeline.
 
@@ -2094,14 +2655,35 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
     # Check for existing pack to enable incremental conversion
     existing_pack = detect_existing_pack(pack_output_dir)
     skip_to_godot = all(existing_pack.values())
+
+    # Assets are all present but the metadata predates this converter, so the
+    # pack must not skip ahead: it would keep whatever fields the older version
+    # emitted forever. Everything re-runs except the FBX copy, which is the one
+    # genuinely expensive step and cannot have gone stale - the files are there.
+    refresh_metadata = (
+        not skip_to_godot
+        and not existing_pack["has_current_metadata"]
+        and all(
+            value
+            for key, value in existing_pack.items()
+            if key != "has_current_metadata"
+        )
+    )
+
     if skip_to_godot:
         logger.info("Existing pack detected with all prerequisites - skipping to mesh generation")
         logger.info("  Materials: %s, Textures: %s, Models: %s, Mapping: %s",
                     existing_pack["has_materials"], existing_pack["has_textures"],
                     existing_pack["has_models"], existing_pack["has_mapping"])
+    elif refresh_metadata:
+        logger.info("Existing pack has outdated metadata - regenerating it (FBX copy skipped)")
 
     # Store temp dir path for cleanup (always runs via finally, even on error)
     temp_dir_to_cleanup = None
+
+    # Resolved once the package is extracted; assets is the safe default for the
+    # existing-pack path, which never inspects the package at all.
+    pack_mode = "assets" if config.pack_type == "auto" else config.pack_type
 
     # Steps 3-10: Skip if existing pack detected with all prerequisites
     if not skip_to_godot:
@@ -2119,212 +2701,241 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
         if guid_map.texture_guid_to_path:
             temp_dir_to_cleanup = next(iter(guid_map.texture_guid_to_path.values())).parent
 
+        pack_mode = config.pack_type
+        if pack_mode == "auto":
+            pack_mode = detect_pack_type(guid_map)
+        logger.info("Pack type: %s", pack_mode)
+
     try:
         # Steps 4-10: Parse and generate assets
         # (skipped entirely if existing pack detected with all prerequisites)
         if skip_to_godot:
             logger.info("Steps 3-10: Skipped (existing pack detected)")
         else:
-            # Step 4: Parse all .mat files
-            material_guids = get_material_guids(guid_map)
-            logger.info("Step 4: Parsing %d materials...", len(material_guids))
-            unity_materials: list[tuple[str, UnityMaterial]] = []
+            # Steps 4-8 build materials, shaders and textures. An animation
+            # pack has none of those - only clip FBX - so they are skipped.
+            if pack_mode == "assets":
+                # Step 4: Parse all .mat files
+                material_guids = get_material_guids(guid_map)
+                logger.info("Step 4: Parsing %d materials...", len(material_guids))
+                unity_materials: list[tuple[str, UnityMaterial]] = []
 
-            for guid in material_guids:
-                content = guid_map.guid_to_content.get(guid)
-                if content is None:
-                    warning_msg = f"No content for material GUID: {guid}"
-                    logger.debug(warning_msg)
-                    stats.warnings.append(warning_msg)
-                    continue
+                for guid in material_guids:
+                    content = guid_map.guid_to_content.get(guid)
+                    if content is None:
+                        warning_msg = f"No content for material GUID: {guid}"
+                        logger.debug(warning_msg)
+                        stats.warnings.append(warning_msg)
+                        continue
 
-                try:
-                    material = parse_material_bytes(content)
-                    unity_materials.append((guid, material))
-                    stats.materials_parsed += 1
-                except Exception as e:
-                    warning_msg = f"Failed to parse material GUID {guid}: {e}"
-                    logger.debug(warning_msg)
-                    stats.warnings.append(warning_msg)
-
-            logger.debug("Parsed %d Unity materials", stats.materials_parsed)
-
-            # Step 4.5: Parse MaterialList*.txt early for shader detection
-            # This needs to happen BEFORE shader detection so we can use the
-            # uses_custom_shader information from MaterialList
-            # Use rglob for recursive search to handle complex nested structures
-            material_list_files = list(config.source_files.rglob("MaterialList*.txt"))
-            prefabs: list[PrefabMaterials] = []
-            shader_cache: dict[str, str] = {}
-            unmatched_materials: list[str] = []
-
-            if material_list_files:
-                for material_list_path in material_list_files:
-                    logger.debug("Parsing %s for shader detection...", material_list_path.name)
                     try:
-                        file_prefabs = parse_material_list(material_list_path)
-                        prefabs.extend(file_prefabs)
-                        logger.debug("  Found %d prefabs in %s", len(file_prefabs), material_list_path.name)
+                        material = parse_material_bytes(content)
+                        unity_materials.append((guid, material))
+                        stats.materials_parsed += 1
                     except Exception as e:
-                        logger.debug("Failed to parse %s: %s", material_list_path.name, e)
+                        warning_msg = f"Failed to parse material GUID {guid}: {e}"
+                        logger.debug(warning_msg)
+                        stats.warnings.append(warning_msg)
 
-                logger.debug("Total prefabs from all MaterialList files: %d", len(prefabs))
+                logger.debug("Parsed %d Unity materials", stats.materials_parsed)
 
-            # Determine filtered material names early (before .tres generation)
-            filtered_material_names: set[str] | None = None
-            if config.filter_pattern and prefabs:
-                filtered_material_names = get_filtered_material_names(
-                    prefabs, config.filter_pattern, config.source_files
+                # Step 4.5: Parse MaterialList*.txt early for shader detection
+                # This needs to happen BEFORE shader detection so we can use the
+                # uses_custom_shader information from MaterialList
+                # Use rglob for recursive search to handle complex nested structures
+                material_list_files = list(config.source_files.rglob("MaterialList*.txt"))
+                prefabs: list[PrefabMaterials] = []
+                shader_cache: dict[str, str] = {}
+                unmatched_materials: list[str] = []
+
+                if material_list_files:
+                    for material_list_path in material_list_files:
+                        logger.debug("Parsing %s for shader detection...", material_list_path.name)
+                        try:
+                            file_prefabs = parse_material_list(material_list_path)
+                            prefabs.extend(file_prefabs)
+                            logger.debug("  Found %d prefabs in %s", len(file_prefabs), material_list_path.name)
+                        except Exception as e:
+                            logger.debug("Failed to parse %s: %s", material_list_path.name, e)
+
+                    logger.debug("Total prefabs from all MaterialList files: %d", len(prefabs))
+
+                # Fall back to the package's prefabs when MaterialList*.txt is
+                # absent or yielded nothing. Synty ships MaterialList*.txt only in
+                # the separate SourceFiles download, never in the .unitypackage,
+                # but prefabs carry the same mesh-to-material data (prefab_parser).
+                if not prefabs:
+                    logger.info("No MaterialList data - deriving mappings from package prefabs")
+                    prefabs = build_prefabs_from_package(guid_map)
+                    logger.info("Derived mappings for %d prefab(s) from package", len(prefabs))
+                    if not prefabs:
+                        warning_msg = (
+                            "No MaterialList*.txt and no usable prefabs in package - "
+                            "meshes will have no materials assigned"
+                        )
+                        logger.warning(warning_msg)
+                        stats.warnings.append(warning_msg)
+
+                # Determine filtered material names early (before .tres generation)
+                filtered_material_names: set[str] | None = None
+                if config.filter_pattern and prefabs:
+                    filtered_material_names = get_filtered_material_names(
+                        prefabs, config.filter_pattern, config.source_files
+                    )
+                    logger.info("Filter limits to %d materials", len(filtered_material_names))
+
+                if prefabs:
+                    # Step 5: Build shader cache with LOD inheritance
+                    logger.info("Step 5: Mapping shader properties...")
+                    shader_cache, unmatched_materials = build_shader_cache(prefabs)
+                    logger.debug("Shader cache: %d materials cached", len(shader_cache))
+
+                    # Log unmatched materials for user to add patterns
+                    if unmatched_materials:
+                        logger.debug("=" * 60)
+                        logger.debug("UNMATCHED MATERIALS - Consider adding name patterns for:")
+                        for mat_name in sorted(set(unmatched_materials)):
+                            logger.debug("  - %s", mat_name)
+                        logger.debug("=" * 60)
+                else:
+                    logger.info("Step 5: Mapping shader properties...")
+                    logger.debug("MaterialList*.txt not found, using fallback shader detection")
+
+                # Map material properties to Godot equivalents (continuation of Step 5)
+                logger.debug("Mapping materials to Godot format...")
+                mapped_materials: list[MappedMaterial] = []
+                required_textures: set[str] = set()
+
+                for guid, unity_mat in unity_materials:
+                    try:
+                        # Use cached shader decision if available
+                        cached_shader = shader_cache.get(unity_mat.name)
+                        mapped = map_material(unity_mat, guid_map.texture_guid_to_name, override_shader=cached_shader)
+                        mapped_materials.append(mapped)
+
+                        # Collect required textures
+                        for texture_name in mapped.textures.values():
+                            required_textures.add(texture_name)
+
+                    except Exception as e:
+                        warning_msg = f"Failed to map material '{unity_mat.name}': {e}"
+                        logger.debug(warning_msg)
+                        stats.warnings.append(warning_msg)
+
+                logger.debug("Mapped %d materials, requiring %d textures", len(mapped_materials), len(required_textures))
+
+                # Step 6: Resolve shader paths (find existing or copy missing)
+                # This must happen before .tres generation so we can use discovered paths
+                logger.info("Step 6: Resolving shader paths...")
+                script_dir = Path(__file__).parent
+                shaders_src = script_dir / "shaders"
+                shader_paths, stats.shaders_copied = get_shader_paths(
+                    project_dir,
+                    shaders_src,
+                    config.dry_run,
                 )
-                logger.info("Filter limits to %d materials", len(filtered_material_names))
 
-            if material_list_files:
-                # Step 5: Build shader cache with LOD inheritance
-                logger.info("Step 5: Mapping shader properties...")
-                shader_cache, unmatched_materials = build_shader_cache(prefabs)
-                logger.debug("Shader cache: %d materials cached", len(shader_cache))
+                # Step 7: Generate .tres files
+                logger.info("Step 7: Generating .tres files...")
+                materials_dir = pack_output_dir / "materials"
 
-                # Log unmatched materials for user to add patterns
-                if unmatched_materials:
-                    logger.debug("=" * 60)
-                    logger.debug("UNMATCHED MATERIALS - Consider adding name patterns for:")
-                    for mat_name in sorted(set(unmatched_materials)):
-                        logger.debug("  - %s", mat_name)
-                    logger.debug("=" * 60)
-            else:
-                logger.info("Step 5: Mapping shader properties...")
-                logger.debug("MaterialList*.txt not found, using fallback shader detection")
+                # Pack-relative texture path (textures are in pack folder, not root)
+                if config.output_subfolder:
+                    subfolder = config.output_subfolder.replace("\\", "/").strip("/")
+                    texture_base = f"res://{subfolder}/{pack_name}/textures"
+                else:
+                    texture_base = f"res://{pack_name}/textures"
 
-            # Map material properties to Godot equivalents (continuation of Step 5)
-            logger.debug("Mapping materials to Godot format...")
-            mapped_materials: list[MappedMaterial] = []
-            required_textures: set[str] = set()
+                # Materials sit beside the textures, so the same base locates
+                # both - and the .tres needs its own res:// path to derive a UID.
+                material_base = texture_base.rsplit("/", 1)[0] + "/materials"
 
-            for guid, unity_mat in unity_materials:
-                try:
-                    # Use cached shader decision if available
-                    cached_shader = shader_cache.get(unity_mat.name)
-                    mapped = map_material(unity_mat, guid_map.texture_guid_to_name, override_shader=cached_shader)
-                    mapped_materials.append(mapped)
+                for mapped_mat in mapped_materials:
+                    # Skip materials not used by filtered FBX files
+                    if filtered_material_names is not None and mapped_mat.name not in filtered_material_names:
+                        continue
 
-                    # Collect required textures
-                    for texture_name in mapped.textures.values():
-                        required_textures.add(texture_name)
+                    try:
+                        # Sanitize filename
+                        filename = sanitize_filename(mapped_mat.name) + ".tres"
+                        output_path = materials_dir / filename
 
-                except Exception as e:
-                    warning_msg = f"Failed to map material '{unity_mat.name}': {e}"
-                    logger.debug(warning_msg)
-                    stats.warnings.append(warning_msg)
+                        # Generate .tres content with discovered shader paths
+                        tres_content = generate_tres(
+                            mapped_mat,
+                            shader_base="res://shaders",  # Fallback if shader not in shader_paths
+                            texture_base=texture_base,
+                            shader_paths=shader_paths,
+                            res_path=f"{material_base}/{filename}"
+                        )
 
-            logger.debug("Mapped %d materials, requiring %d textures", len(mapped_materials), len(required_textures))
+                        if config.dry_run:
+                            logger.debug("[DRY RUN] Would write material: %s", output_path)
+                        else:
+                            write_tres_file(tres_content, output_path)
+                            logger.debug("Wrote material: %s", filename)
 
-            # Step 6: Resolve shader paths (find existing or copy missing)
-            # This must happen before .tres generation so we can use discovered paths
-            logger.info("Step 6: Resolving shader paths...")
-            script_dir = Path(__file__).parent
-            shaders_src = script_dir / "shaders"
-            shader_paths, stats.shaders_copied = get_shader_paths(
-                project_dir,
-                shaders_src,
-                config.dry_run,
-            )
+                        stats.materials_generated += 1
 
-            # Step 7: Generate .tres files
-            logger.info("Step 7: Generating .tres files...")
-            materials_dir = pack_output_dir / "materials"
+                    except Exception as e:
+                        warning_msg = f"Failed to generate .tres for '{mapped_mat.name}': {e}"
+                        logger.debug(warning_msg)
+                        stats.warnings.append(warning_msg)
 
-            # Pack-relative texture path (textures are in pack folder, not root)
-            if config.output_subfolder:
-                subfolder = config.output_subfolder.replace("\\", "/").strip("/")
-                texture_base = f"res://{subfolder}/{pack_name}/textures"
-            else:
-                texture_base = f"res://{pack_name}/textures"
+                logger.debug("Generated %d .tres material files", stats.materials_generated)
 
-            for mapped_mat in mapped_materials:
-                # Skip materials not used by filtered FBX files
-                if filtered_material_names is not None and mapped_mat.name not in filtered_material_names:
-                    continue
+                # Step 8: Copy required textures
+                # Textures primarily come from .unitypackage extraction (texture_guid_to_path)
+                # SourceFiles/Textures is used as optional fallback for any missing textures
 
-                try:
-                    # Generate .tres content with discovered shader paths
-                    tres_content = generate_tres(
-                        mapped_mat,
-                        shader_base="res://shaders",  # Fallback if shader not in shader_paths
-                        texture_base=texture_base,
-                        shader_paths=shader_paths
+                # Apply smart texture filtering when filter pattern is specified
+                # (filtered_material_names was computed earlier for .tres filtering)
+                if filtered_material_names is not None:
+                    original_texture_count = len(required_textures)
+                    required_textures = filter_textures_for_materials(
+                        required_textures, filtered_material_names, mapped_materials
+                    )
+                    logger.debug(
+                        "Smart texture filter reduced textures from %d to %d",
+                        original_texture_count, len(required_textures)
                     )
 
-                    # Sanitize filename
-                    filename = sanitize_filename(mapped_mat.name) + ".tres"
-                    output_path = materials_dir / filename
-
-                    if config.dry_run:
-                        logger.debug("[DRY RUN] Would write material: %s", output_path)
+                logger.info("Step 8: Copying %d textures...", len(required_textures))
+                # Find all Textures directories recursively for complex nested structures (optional fallback)
+                texture_dirs = [config.source_files / "Textures"]
+                if not texture_dirs[0].exists():
+                    texture_dirs = [d for d in config.source_files.rglob("Textures") if d.is_dir()]
+                    if texture_dirs:
+                        logger.debug("Found %d Textures directories as fallback sources", len(texture_dirs))
+                        for td in texture_dirs:
+                            logger.debug("  Textures dir: %s", td)
                     else:
-                        write_tres_file(tres_content, output_path)
-                        logger.debug("Wrote material: %s", filename)
+                        logger.debug("No SourceFiles/Textures found - using .unitypackage textures only")
+                source_textures = texture_dirs[0] if texture_dirs else config.source_files / "Textures"
+                # Additional texture directories (all except the primary one)
+                additional_texture_dirs = texture_dirs[1:] if len(texture_dirs) > 1 else None
+                output_textures = pack_output_dir / "textures"
 
-                    stats.materials_generated += 1
+                # Build reverse lookup: texture_name -> GUID
+                texture_name_to_guid = {name: guid for guid, name in guid_map.texture_guid_to_name.items()}
 
-                except Exception as e:
-                    warning_msg = f"Failed to generate .tres for '{mapped_mat.name}': {e}"
-                    logger.debug(warning_msg)
-                    stats.warnings.append(warning_msg)
-
-            logger.debug("Generated %d .tres material files", stats.materials_generated)
-
-            # Step 8: Copy required textures
-            # Textures primarily come from .unitypackage extraction (texture_guid_to_path)
-            # SourceFiles/Textures is used as optional fallback for any missing textures
-
-            # Apply smart texture filtering when filter pattern is specified
-            # (filtered_material_names was computed earlier for .tres filtering)
-            if filtered_material_names is not None:
-                original_texture_count = len(required_textures)
-                required_textures = filter_textures_for_materials(
-                    required_textures, filtered_material_names, mapped_materials
+                # Copy required textures (no fallback - missing textures will be logged as warnings)
+                # Prefer textures from .unitypackage temp files over SourceFiles
+                stats.textures_copied, stats.textures_fallback, stats.textures_missing = copy_textures(
+                    source_textures,
+                    output_textures,
+                    required_textures,
+                    config.dry_run,
+                    fallback_texture=None,  # No fallback - let missing textures fail
+                    texture_guid_to_path=guid_map.texture_guid_to_path,
+                    texture_name_to_guid=texture_name_to_guid,
+                    additional_texture_dirs=additional_texture_dirs,
+                    high_quality_textures=config.high_quality_textures,
                 )
-                logger.debug(
-                    "Smart texture filter reduced textures from %d to %d",
-                    original_texture_count, len(required_textures)
-                )
-
-            logger.info("Step 8: Copying %d textures...", len(required_textures))
-            # Find all Textures directories recursively for complex nested structures (optional fallback)
-            texture_dirs = [config.source_files / "Textures"]
-            if not texture_dirs[0].exists():
-                texture_dirs = [d for d in config.source_files.rglob("Textures") if d.is_dir()]
-                if texture_dirs:
-                    logger.debug("Found %d Textures directories as fallback sources", len(texture_dirs))
-                    for td in texture_dirs:
-                        logger.debug("  Textures dir: %s", td)
-                else:
-                    logger.debug("No SourceFiles/Textures found - using .unitypackage textures only")
-            source_textures = texture_dirs[0] if texture_dirs else config.source_files / "Textures"
-            # Additional texture directories (all except the primary one)
-            additional_texture_dirs = texture_dirs[1:] if len(texture_dirs) > 1 else None
-            output_textures = pack_output_dir / "textures"
-
-            # Build reverse lookup: texture_name -> GUID
-            texture_name_to_guid = {name: guid for guid, name in guid_map.texture_guid_to_name.items()}
-
-            # Copy required textures (no fallback - missing textures will be logged as warnings)
-            # Prefer textures from .unitypackage temp files over SourceFiles
-            stats.textures_copied, stats.textures_fallback, stats.textures_missing = copy_textures(
-                source_textures,
-                output_textures,
-                required_textures,
-                config.dry_run,
-                fallback_texture=None,  # No fallback - let missing textures fail
-                texture_guid_to_path=guid_map.texture_guid_to_path,
-                texture_name_to_guid=texture_name_to_guid,
-                additional_texture_dirs=additional_texture_dirs,
-                high_quality_textures=config.high_quality_textures,
-            )
 
             # Step 9: Copy FBX files
             # Simplified approach: find ALL .fbx files recursively, preserving relative path structure
-            if not config.skip_fbx_copy:
+            if not config.skip_fbx_copy and not refresh_metadata:
                 # Find all FBX files recursively from source root
                 # Note: On Windows, rglob is case-insensitive so *.fbx matches *.FBX
                 fbx_files = list(config.source_files.rglob("*.fbx"))
@@ -2385,48 +2996,215 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
             else:
                 logger.info("Step 9: Skipping FBX copy...")
 
-            # Step 10: Generate mesh_material_mapping.json (uses prefabs parsed in Step 4.5)
-            # Note: mapping goes to pack_output_dir so each pack has its own mapping
-            logger.info("Step 10: Generating mesh material mapping...")
-            if prefabs:
-                mapping_output = pack_output_dir / "mesh_material_mapping.json"
-                if config.dry_run:
-                    logger.debug("[DRY RUN] Would write mesh_material_mapping.json")
-                else:
-                    generate_mesh_material_mapping_json(prefabs, mapping_output)
-                    logger.debug("Generated mesh_material_mapping.json to pack folder")
-
-                # Check for missing material references (no placeholders - just warn)
-                if not config.dry_run:
-                    logger.debug("Checking for missing material references...")
-                    materials_dir = pack_output_dir / "materials"
-                    existing_materials = {f.stem for f in materials_dir.glob("*.tres")}
-
-                    # Collect all referenced materials from prefabs
-                    referenced_materials: set[str] = set()
-                    for prefab in prefabs:
-                        for mesh in prefab.meshes:
-                            for slot in mesh.slots:
-                                if slot.material_name:
-                                    referenced_materials.add(slot.material_name)
-
-                    # Find missing materials - just warn, don't create placeholders
-                    missing_materials = referenced_materials - existing_materials
-                    stats.materials_missing = len(missing_materials)
-
-                    if missing_materials:
-                        logger.debug(
-                            "Found %d missing material(s) - these meshes will use default materials:",
-                            len(missing_materials)
-                        )
-                        for mat_name in sorted(missing_materials):
-                            logger.debug("  Missing: %s", mat_name)
+            # Mesh-material mapping and character definitions are asset-pack
+            # concepts; animation packs produce AnimationLibrary resources.
+            if pack_mode == "assets":
+                # Step 10: Generate mesh_material_mapping.json (uses prefabs parsed in Step 4.5)
+                # Note: mapping goes to pack_output_dir so each pack has its own mapping
+                logger.info("Step 10: Generating mesh material mapping...")
+                if prefabs:
+                    mapping_output = pack_output_dir / "mesh_material_mapping.json"
+                    if config.dry_run:
+                        logger.debug("[DRY RUN] Would write mesh_material_mapping.json")
                     else:
-                        logger.debug("All referenced materials exist")
+                        generate_mesh_material_mapping_json(prefabs, mapping_output)
+                        logger.debug("Generated mesh_material_mapping.json to pack folder")
+
+                        # A prefab variant names its mesh by the source FBX, so
+                        # the other meshes in a multi-mesh FBX get no mapping of
+                        # their own - a hand cart is painted while its wheels
+                        # stay untextured. Godot knows which FBX each mesh came
+                        # from and falls back to this table.
+                        fbx_fallback = build_fbx_material_fallback(guid_map)
+                        if fbx_fallback:
+                            (pack_output_dir / "fbx_material_fallback.json").write_text(
+                                json.dumps(fbx_fallback, indent=2, ensure_ascii=False),
+                                encoding="utf-8",
+                            )
+                            logger.debug(
+                                "Wrote FBX material fallback for %d FBX file(s)",
+                                len(fbx_fallback),
+                            )
+
+                        # Character definitions drive rigged-character output in
+                        # godot_converter.gd. Absent file simply means no characters.
+                        char_defs = build_character_definitions(guid_map)
+                        if char_defs:
+                            write_character_definitions_json(
+                                char_defs, pack_output_dir / "character_definitions.json"
+                            )
+                            logger.info("Wrote %d character definition(s)", len(char_defs))
+
+                        # Sidekick packs ship characters as .sk recipes naming
+                        # one part FBX per body slot. Resolution scans the
+                        # pack's models/ directory, which Step 9 has already
+                        # populated - package asset paths would not match,
+                        # because copy_fbx_files() rewrites them.
+                        sk_recipes = build_sidekick_recipes(
+                            guid_map,
+                            [config.source_files],
+                            pack_output_dir / "models",
+                        )
+                        if sk_recipes:
+                            write_sidekick_characters_json(
+                                sk_recipes,
+                                pack_output_dir / "sidekick_characters.json",
+                            )
+                            logger.info(
+                                "Wrote %d Sidekick character recipe(s)",
+                                len(sk_recipes),
+                            )
+
+                            # Proportions reshape the body mesh but leave the
+                            # attachment joints where they were, so gear floats
+                            # off a heavy character. Synty keeps the per-joint
+                            # corrections in its tool database, which ships in
+                            # the user's Unity project rather than the package -
+                            # so this is available only via --source-files.
+                            # A caller that already knows where the database
+                            # is says so: it installs as SidekickCharacters/,
+                            # which matches no pack name, so a per-pack search
+                            # of source_files can never turn it up.
+                            sk_database = config.sidekick_database or (
+                                find_sidekick_database([config.source_files])
+                            )
+                            if sk_database:
+                                sk_adjustments = load_rig_adjustments(sk_database)
+                                if sk_adjustments:
+                                    write_sidekick_rig_adjustments_json(
+                                        sk_adjustments,
+                                        pack_output_dir / "sidekick_rig_adjustments.json",
+                                    )
+                                    logger.info(
+                                        "Wrote joint adjustments for %d bone(s)",
+                                        len(sk_adjustments),
+                                    )
+                                    # Also to the output root, for the runtime
+                                    # node: the data is database-derived and
+                                    # global, like the gear sets and colour
+                                    # tables. The per-pack copy stays, because
+                                    # the baked character scenes read it there.
+                                    write_sidekick_rig_adjustments_json(
+                                        sk_adjustments,
+                                        pack_output_dir.parent
+                                        / "sidekick_rig_adjustments.json",
+                                    )
+
+                                # Gear sets and colour tables describe the whole
+                                # shared part library, not this pack, so they go
+                                # to the output root. Every Sidekick pack derives
+                                # identical content from the same database, which
+                                # makes rewriting them idempotent, not a conflict.
+                                output_root = pack_output_dir.parent
+                                sk_sets = load_part_presets(sk_database)
+                                if sk_sets:
+                                    write_sidekick_gear_sets_json(
+                                        sk_sets, output_root / "sidekick_gear_sets.json"
+                                    )
+                                    logger.info("Wrote %d gear set(s)", len(sk_sets))
+
+                                sk_colors = load_color_tables(sk_database)
+                                if sk_colors["properties"]:
+                                    write_sidekick_colors_json(
+                                        sk_colors, output_root / "sidekick_colors.json"
+                                    )
+                                    logger.info(
+                                        "Wrote %d colour propert(ies)",
+                                        len(sk_colors["properties"]),
+                                    )
+
+                                # The master palette defines every colour slot,
+                                # so any mix of parts renders against it without
+                                # a red texel. Per-character palettes are
+                                # recolours of it.
+                                # The palette sits in the same tool folder as
+                                # the database - Resources/Textures beside
+                                # Database - and in no pack's folder, so a
+                                # located database says where to look. Without
+                                # this, a user with the tool gets its gear sets
+                                # and colour tables but no palette to paint
+                                # with, and recolouring stays disabled.
+                                palette_dirs = [config.source_files]
+                                if config.sidekick_database is not None:
+                                    palette_dirs.insert(
+                                        0, config.sidekick_database.parent.parent
+                                    )
+                                sk_master = find_master_color_map(palette_dirs)
+                                if sk_master:
+                                    parts_dir = output_root / SIDEKICK_PARTS_DIRNAME
+                                    parts_dir.mkdir(parents=True, exist_ok=True)
+                                    shutil.copy2(
+                                        sk_master,
+                                        parts_dir / "T_SidekickMaster_ColorMap.png",
+                                    )
+                                    logger.info("Copied master Sidekick palette")
+                            else:
+                                logger.debug(
+                                    "No Sidekick tool database under --source-files; "
+                                    "attachment joints will not follow body size"
+                                )
+                                # No database means no curated sets, but the part
+                                # names alone still group into usable ones.
+                                #
+                                # Guarded on absence: a pack converted with a
+                                # database may already have written the richer
+                                # file into this same shared root, and a
+                                # name-derived one must not clobber it.
+                                gear_path = (
+                                    pack_output_dir.parent / "sidekick_gear_sets.json"
+                                )
+                                if not gear_path.is_file():
+                                    fbx_names = [
+                                        path.stem
+                                        for path in (
+                                            pack_output_dir / "models"
+                                        ).rglob("*.fbx")
+                                    ]
+                                    fallback_sets = derive_gear_sets_from_names(fbx_names)
+                                    if fallback_sets:
+                                        write_sidekick_gear_sets_json(
+                                            fallback_sets, gear_path
+                                        )
+                                        logger.info(
+                                            "Wrote %d name-derived gear set(s)",
+                                            len(fallback_sets),
+                                        )
+
+                        # Stamped last: the pack only counts as current once
+                        # every metadata file above has actually been written.
+                        write_pack_metadata(pack_output_dir)
+
+                    # Check for missing material references (no placeholders - just warn)
+                    if not config.dry_run:
+                        logger.debug("Checking for missing material references...")
+                        materials_dir = pack_output_dir / "materials"
+                        existing_materials = {f.stem for f in materials_dir.glob("*.tres")}
+
+                        # Collect all referenced materials from prefabs
+                        referenced_materials: set[str] = set()
+                        for prefab in prefabs:
+                            for mesh in prefab.meshes:
+                                for slot in mesh.slots:
+                                    if slot.material_name:
+                                        referenced_materials.add(slot.material_name)
+
+                        # Find missing materials - just warn, don't create placeholders
+                        missing_materials = referenced_materials - existing_materials
+                        stats.materials_missing = len(missing_materials)
+
+                        if missing_materials:
+                            logger.debug(
+                                "Found %d missing material(s) - these meshes will use default materials:",
+                                len(missing_materials)
+                            )
+                            for mat_name in sorted(missing_materials):
+                                logger.debug("  Missing: %s", mat_name)
+                        else:
+                            logger.debug("All referenced materials exist")
+                    else:
+                        logger.debug("Skipping missing materials check (dry run)")
                 else:
-                    logger.debug("Skipping missing materials check (dry run)")
-            else:
-                logger.debug("No MaterialList data available, skipping mesh-material mapping")
+                    logger.debug("No MaterialList data available, skipping mesh-material mapping")
 
         # Step 11: Generate or update project.godot
         logger.info("Step 11: Generating project.godot...")
@@ -2443,16 +3221,36 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
             else:
                 full_pack_name = pack_name
 
+            # Resolve requested animation libraries. These live at project root
+            # and are produced by earlier animation-pack conversions, so an
+            # unmatched selector usually means that pack has not been converted.
+            animation_libraries = resolve_animation_libraries(
+                project_dir, config.animations
+            )
+            if config.animations and not animation_libraries:
+                warning_msg = (
+                    f"No animation libraries matched '{config.animations}' "
+                    f"in {project_dir / 'animations'}"
+                )
+                logger.warning(warning_msg)
+                stats.warnings.append(warning_msg)
+            elif animation_libraries:
+                logger.info(
+                    "Binding %d animation library(ies)", len(animation_libraries)
+                )
+
             (
                 stats.godot_import_success,
                 stats.godot_convert_success,
                 stats.godot_timeout_occurred,
+                stats.godot_report,
             ) = run_godot_cli(
                 config.godot_exe,
                 project_dir,
                 config.godot_timeout,
                 config.dry_run,
                 skip_import=config.skip_godot_import,
+                retarget=config.retarget,
                 keep_meshes_together=config.keep_meshes_together,
                 mesh_format=config.mesh_format,
                 filter_pattern=config.filter_pattern,
@@ -2460,6 +3258,8 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
                 pack_name=full_pack_name,
                 output_subfolder=config.output_subfolder,
                 flatten_output=config.flatten_output,
+                mode=pack_mode,
+                animation_libraries=animation_libraries,
             )
 
             # Count generated mesh files
@@ -2480,8 +3280,27 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
                 logger.debug("Generated %d .tscn scene files", stats.meshes_converted)
             else:
                 logger.debug("No mesh files generated")
+
+            # Staging FBX are no longer referenced by anything once the
+            # scenes exist. Never prune a failed run: that would delete the
+            # inputs needed to retry it.
+            if config.prune_models:
+                if should_prune_models(stats):
+                    prune_pack_models(pack_output_dir, config.dry_run)
+                else:
+                    logger.warning(
+                        "Not pruning models/: conversion did not complete cleanly"
+                    )
         else:
             logger.info("Step 12: Skipping Godot CLI...")
+
+        # Step 13: Give generated resources a UID. Godot assigns one only when
+        # the editor saves a resource, so without this every generated scene and
+        # material stays unaddressable as uid:// - including from quick-open.
+        if not config.dry_run:
+            stamped = stamp_resource_uids(pack_output_dir, project_dir)
+            if stamped:
+                logger.info("Step 13: Stamped %d resource UID(s)", stamped)
 
         # Write conversion log (not in dry run for the log file itself)
         # Note: log goes to project root (next to project.godot) and appends

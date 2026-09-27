@@ -14,9 +14,12 @@ The Synty Shader Converter provides a Python API for programmatically converting
 | [unity_package](unity_package.md) | Package extraction and GUID mapping | [Step 3](../steps/03-extract-unity-package.md) |
 | [unity_parser](unity_parser.md) | Material file parsing (regex-based `.mat` files) | [Step 4](../steps/04-parse-materials.md) |
 | [shader_mapping](shader_mapping.md) | Shader detection and property mapping (core module) | [Step 6](../steps/06-shader-detection.md) |
-| [tres_generator](tres_generator.md) | Godot `.tres` file generation | [Step 7](../steps/07-tres-generation.md) |
+| [tres_generator](tres_generator.md) | Godot `.tres` file generation and resource UIDs | [Step 7](../steps/07-tres-generation.md), [Step 13](../steps/13-resource-uids.md) |
 | [material_list](material_list.md) | MaterialList.txt parsing for mesh-material assignments | [Step 5](../steps/05-parse-material-list.md) |
 | [godot_converter](godot_converter.md) | GDScript FBX to scene conversion | [Step 12](../steps/12-godot-conversion.md) |
+| [sidekick](sidekick.md) | Sidekick character recipes, gear sets, and palettes | [Step 12](../steps/12-godot-conversion.md) |
+| [retarget](retarget.md) | Rig retargeting onto `SkeletonProfileHumanoid` | [Step 12](../steps/12-godot-conversion.md) |
+| [synty_library](synty_library.md) | Whole-library batch conversion (CLI and GUI) | [Step 0](../steps/00-cli-orchestration.md) |
 | [constants](constants.md) | Shader GUID and property mapping reference | [Step 6](../steps/06-shader-detection.md) |
 
 ## Data Flow

@@ -7,6 +7,7 @@ This spec file bundles:
 - All Python converter modules
 - Shader files (.gdshader)
 - Godot converter script (godot_converter.gd)
+- Sidekick runtime addon (addon/synty_sidekick/)
 - CustomTkinter data files
 - tkinterdnd2 DLL files
 
@@ -38,6 +39,11 @@ datas = [
     (str(project_root / 'shaders'), 'shaders'),
     # Godot converter script
     (str(project_root / 'godot_converter.gd'), '.'),
+    # Sidekick runtime addon, installed into any project that converts a
+    # SIDEKICK pack. ADDON_SOURCE resolves from synty_library's __file__,
+    # which PyInstaller points at the extraction directory - the same way
+    # the shaders above are found.
+    (str(project_root / 'addon'), 'addon'),
 ]
 
 # Add collected package data
@@ -54,6 +60,10 @@ hidden_imports = [
     'unity_package',
     'unity_parser',
     'material_list',
+    'prefab_parser',
+    'sidekick',
+    'retarget',
+    'synty_library',
     # GUI dependencies
     'customtkinter',
     'tkinterdnd2',

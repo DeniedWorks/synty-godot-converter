@@ -44,6 +44,8 @@ This approach has several advantages:
 | `.tscn` files | Individual mesh scene files (per-pack in `PACK_NAME/meshes/`) |
 | `project.godot` | Godot project with global shader uniforms |
 | `PACK_NAME/mesh_material_mapping.json` | Mesh-to-material mapping for Godot CLI (per-pack) |
+| `PACK_NAME/character_definitions.json` | Character body/equipment composition for rigged output |
+| `animations/<Pack>_<Family>.res` | AnimationLibrary per pack per rig family |
 | `converter_config.json` | Runtime configuration for the GDScript converter (pack_name, mesh_scale, output_subfolder, flatten_output) |
 | `conversion_log.txt` | Conversion summaries (appends for each pack) |
 

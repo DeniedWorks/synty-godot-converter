@@ -40,6 +40,7 @@ Module Structure:
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 from pathlib import Path
@@ -131,6 +132,96 @@ TRIPLANAR_PREFIXES: tuple[str, ...] = (
 # =============================================================================
 # NUMBER FORMATTING
 # =============================================================================
+
+
+# Godot's resource UID alphabet: base 34, with "a"-"z" as 0-25 and "0"-"9"
+# continuing from 25. Encoding therefore never emits "z" or "9", though
+# ResourceUID decodes both.
+_UID_BASE = 34
+_UID_LETTERS = 25
+
+
+def _encode_uid(value: int) -> str:
+    """Renders an id the way Godot's ResourceUID::id_to_text does."""
+    if value <= 0:
+        return "a"
+    out: list[str] = []
+    while value:
+        digit = value % _UID_BASE
+        if digit < _UID_LETTERS:
+            out.append(chr(ord("a") + digit))
+        else:
+            out.append(chr(ord("0") + digit - _UID_LETTERS))
+        value //= _UID_BASE
+    return "".join(reversed(out))
+
+
+def uid_for_path(res_path: str) -> str:
+    """Derives a stable `uid://` for a resource from its res:// path.
+
+    Godot assigns a UID only when the editor saves a resource, so a generated
+    .tres without one in its header never gets a UID and cannot be addressed as
+    uid://. Deriving it from the path rather than at random keeps it stable
+    across re-runs, so re-converting a pack does not invalidate references to it.
+
+    Args:
+        res_path: The resource's res:// path, e.g. "res://Pack/materials/M.tres".
+
+    Returns:
+        A uid:// string Godot's ResourceUID accepts.
+    """
+    # 60 bits: comfortably inside the positive range Godot masks ids into, and
+    # far enough from a birthday collision for a library of any size.
+    value = int(hashlib.md5(res_path.encode("utf8")).hexdigest()[:15], 16)
+    return "uid://" + _encode_uid(value)
+
+
+
+# The resource tags whose header can carry a uid.
+_RESOURCE_TAGS = ("[gd_scene ", "[gd_scene]", "[gd_resource ")
+
+
+def stamp_resource_uids(directory: Path, project_root: Path | None = None) -> int:
+    """Gives every text resource under a directory a UID if it has none.
+
+    The Godot side saves scenes from a dozen call sites and ResourceSaver does
+    not assign UIDs, so they are stamped here in one pass instead. Binary .res
+    resources are left alone: their header is not text to patch.
+
+    Args:
+        directory: Where to look, usually one pack's output folder.
+        project_root: The Godot project root, which res:// addresses are
+            relative to. Defaults to `directory`; passing the real root matters
+            when scanning a subfolder, since a UID derived from a pack-relative
+            path would collide with the same filename in another pack.
+
+    Returns:
+        Number of files given a UID.
+    """
+    if project_root is None:
+        project_root = directory
+    stamped = 0
+    for path in directory.rglob("*"):
+        if path.suffix not in (".tscn", ".tres") or not path.is_file():
+            continue
+        # Godot's own cache is regenerated and must not be edited.
+        if ".godot" in path.parts:
+            continue
+        try:
+            text = path.read_text(encoding="utf8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        header, separator, rest = text.partition("\n")
+        if not header.startswith(_RESOURCE_TAGS) or not header.endswith("]"):
+            continue
+        if "uid=" in header:
+            continue
+        res_path = "res://" + path.relative_to(project_root).as_posix()
+        patched = f'{header[:-1]} uid="{uid_for_path(res_path)}"]'
+        path.write_text(patched + separator + rest, encoding="utf8")
+        stamped += 1
+    return stamped
+
 
 def format_float(value: float) -> str:
     """
@@ -438,7 +529,8 @@ def generate_tres(
     material: "MappedMaterial",
     shader_base: str = "res://shaders",
     texture_base: str = "res://textures",
-    shader_paths: dict[str, str] | None = None
+    shader_paths: dict[str, str] | None = None,
+    res_path: str | None = None
 ) -> str:
     """Generate Godot .tres ShaderMaterial resource content.
 
@@ -460,6 +552,10 @@ def generate_tres(
             When provided, uses the discovered path instead of shader_base.
             This enables dynamic shader path discovery - if the user has moved
             shaders to a different location, the converter will use that path.
+        res_path: The res:// path this file will be written to. When given, the
+            header carries a UID derived from it, without which Godot never
+            assigns the resource one. Omitted by callers that do not know where
+            the content will land.
 
     Returns:
         Complete .tres file content as string.
@@ -509,7 +605,10 @@ def generate_tres(
     lines: list[str] = []
 
     # Header
-    lines.append(f'[gd_resource type="ShaderMaterial" load_steps={load_steps} format=3]')
+    header = f'[gd_resource type="ShaderMaterial" load_steps={load_steps} format=3'
+    if res_path:
+        header += f' uid="{uid_for_path(res_path)}"'
+    lines.append(header + "]")
     lines.append("")
 
     # External resources

@@ -45,6 +45,7 @@ Detailed documentation for each step of the 12-stage conversion pipeline.
 | 10 | [10-copy-fbx.md](steps/10-copy-fbx.md) | FBX model copying |
 | 11 | [11-generate-mapping.md](steps/11-generate-mapping.md) | Mapping file generation |
 | 12 | [12-godot-conversion.md](steps/12-godot-conversion.md) | Godot mesh-to-scene conversion |
+| 13 | [13-resource-uids.md](steps/13-resource-uids.md) | Stable `uid://` for generated resources |
 | - | [gui.md](steps/gui.md) | GUI wrapper documentation |
 
 See [steps/README.md](steps/README.md) for pipeline overview and documentation standards.
@@ -63,6 +64,9 @@ Concise API documentation for programmatic usage.
 | [tres_generator.md](api/tres_generator.md) | Godot .tres file generation |
 | [material_list.md](api/material_list.md) | MaterialList.txt parsing |
 | [godot_converter.md](api/godot_converter.md) | GDScript FBX conversion |
+| [sidekick.md](api/sidekick.md) | Sidekick character recipes, gear sets, and palettes |
+| [retarget.md](api/retarget.md) | Rig retargeting onto SkeletonProfileHumanoid |
+| [synty_library.md](api/synty_library.md) | Whole-library batch conversion |
 | [constants.md](api/constants.md) | Shader GUID and property reference |
 
 ## Contributing
