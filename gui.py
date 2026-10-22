@@ -67,7 +67,9 @@ HELP_TEXT = """SYNTY CONVERTER HELP
 
 PATHS:
 - Unity Package: The .unitypackage file from Synty
-- Source Files: The SourceFiles folder containing FBX and textures
+- Source Files: The SourceFiles folder containing FBX and textures.
+  Leave empty for Unity Asset Store packages, which have no SourceFiles:
+  FBX files, material assignments and model scale come from the package.
 - Output Directory: Where the converted Godot project will be created
 - Godot Executable: Path to Godot 4.6+ executable
 - Output Subfolder: Optional base path for pack folders.
@@ -942,9 +944,11 @@ class SyntyConverterApp:
         if not unity_package.exists():
             errors.append(f"Unity package not found: {unity_package}")
 
-        source_files = Path(self.source_files_var.get())
-        if not source_files.exists():
-            errors.append(f"Source files directory not found: {source_files}")
+        # Empty means an Asset Store package: the converter builds source files from it
+        if self.source_files_var.get():
+            source_files = Path(self.source_files_var.get())
+            if not source_files.exists():
+                errors.append(f"Source files directory not found: {source_files}")
 
         godot_exe = Path(self.godot_exe_var.get())
         if not godot_exe.exists():
@@ -981,7 +985,7 @@ class SyntyConverterApp:
 
         config = ConversionConfig(
             unity_package=Path(self.unity_package_var.get()),
-            source_files=Path(self.source_files_var.get()),
+            source_files=Path(self.source_files_var.get()) if self.source_files_var.get() else None,
             output_dir=Path(self.output_dir_var.get()),
             godot_exe=Path(self.godot_exe_var.get()),
             dry_run=self.dry_run_var.get(),

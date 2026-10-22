@@ -37,6 +37,12 @@ python converter.py \
     --output "C:\Godot\Projects\fantasy-assets" \
     --godot "C:\Godot\Godot_v4.6-stable_mono_win64\Godot_v4.6-stable_mono_win64.exe"
 
+# Unity Asset Store package (no SourceFiles folder): omit --source-files
+python converter.py \
+    --unity-package "POLYGON - Farm Pack - Art by Synty.unitypackage" \
+    --output "C:\Godot\Projects\farm-assets" \
+    --godot "C:\Godot\Godot_v4.6-stable_mono_win64\Godot_v4.6-stable_mono_win64.exe"
+
 # GUI (requires additional dependencies)
 pip install -r requirements-gui.txt
 python gui.py
@@ -60,7 +66,7 @@ This installs CustomTkinter for the graphical interface.
 | Flag | Required | Description |
 |------|----------|-------------|
 | `--unity-package` | Yes | Path to `.unitypackage` file |
-| `--source-files` | Yes | Path to SourceFiles folder containing FBX/ (recursive search, Textures/ optional) |
+| `--source-files` | No | Path to SourceFiles folder containing FBX/ (recursive search, Textures/ optional). Omit for Asset Store packages; see [Asset Store Packages](#asset-store-packages) |
 | `--output` | Yes | Output directory for Godot project |
 | `--godot` | Yes | Path to Godot 4.6 executable |
 | `--dry-run` | No | Preview without writing files |
@@ -76,6 +82,21 @@ This installs CustomTkinter for the graphical interface.
 | `--mesh-scale` | No | Scale factor for mesh output (e.g., `100` for undersized packs) |
 | `--output-subfolder` | No | Subfolder path prepended to pack folder names |
 | `--retain-subfolders` | No | Preserve Source_Files/FBX/ subdirectory structure in mesh output |
+
+## Asset Store Packages
+
+Synty packs bought on the Unity Asset Store download as a single `.unitypackage` with no SourceFiles folder. Omit `--source-files` (or leave the GUI field empty) and the converter builds what SourceFiles would provide from the package itself:
+
+| SourceFiles provides | Built from the package |
+|----------------------|------------------------|
+| `FBX/` | The `.fbx` assets, flattened into one folder |
+| `MaterialList.txt` | Each prefab's mesh and material references |
+| Model scale | Each FBX's Unity import scale, written to Godot's `nodes/root_scale` import option |
+
+Some meshes come out differently from a SourceFiles conversion:
+
+- Meshes no prefab uses get the pack's most-used material, normally its main texture atlas. A few may look wrong if Unity paired them with another material.
+- Effect, light-shaft and convex-collider meshes (`FX_*`, `SunShafts*`, `*_Convex`) keep Godot's default material.
 
 ## Output Structure
 

@@ -288,7 +288,9 @@ def _build_guid_to_pathname(guid_data: dict[str, dict[str, bytes]]) -> dict[str,
 
         try:
             # Pathname file contains UTF-8 text
-            pathname = files["pathname"].decode("utf-8").strip()
+            # Older Asset Store packages append a second line (e.g. "00") after the path
+            text = files["pathname"].decode("utf-8").strip()
+            pathname = text.splitlines()[0].strip() if text else ""
 
             # Remove any null bytes or unusual characters
             pathname = pathname.replace("\x00", "")

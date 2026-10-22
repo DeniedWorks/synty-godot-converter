@@ -74,7 +74,7 @@ This is the primary source for material data, especially for custom shaders like
 
 ### 2. SourceFiles Folder
 
-Contains high-quality source assets:
+Contains high-quality source assets. Unity Asset Store downloads don't include it; omit `--source-files` and the converter builds `FBX/` and `MaterialList.txt` from the `.unitypackage`, along with each model's Unity import scale. See [Asset Store Packages](../README.md#asset-store-packages).
 
 ```
 SourceFiles/
@@ -164,7 +164,7 @@ python gui.py
 The GUI displays input fields in the following order from top to bottom:
 
 1. **Unity Package** - Path to the .unitypackage file (with Browse button)
-2. **Source Files** - Path to the SourceFiles folder (with Browse button)
+2. **Source Files** - Path to the SourceFiles folder (with Browse button). Leave empty for Unity Asset Store packages
 3. **Output Directory** - Base output directory for converted assets (with Browse button)
 4. **Output Subfolder** - Optional subfolder path prepended to pack folder names (text input with "Optional" placeholder). Creates packs at `output/subfolder/POLYGON_PackName/` instead of `output/POLYGON_PackName/`
 5. **Godot Executable** - Path to the Godot 4.6 executable (with Browse button)
@@ -187,7 +187,6 @@ For detailed GUI documentation, see [GUI Application](steps/gui.md).
 | Flag | Description | Example |
 |------|-------------|---------|
 | `--unity-package` | Path to the .unitypackage file from the Synty pack | `"C:\Synty\Fantasy\Fantasy.unitypackage"` |
-| `--source-files` | Path to the SourceFiles folder containing FBX/ (Textures/ optional - textures come from .unitypackage) | `"C:\Synty\Fantasy\SourceFiles"` |
 | `--output` | Output directory for the generated Godot project | `"C:\Godot\Projects\fantasy"` |
 | `--godot` | Path to Godot 4.6 executable | `"C:\Godot\Godot_v4.6.exe"` |
 
@@ -195,6 +194,7 @@ For detailed GUI documentation, see [GUI Application](steps/gui.md).
 
 | Flag | Default | Description |
 |------|---------|-------------|
+| `--source-files` | Built from package | Path to the SourceFiles folder containing FBX/ (Textures/ optional - textures come from .unitypackage). Omit for Unity Asset Store packages, which have no SourceFiles. |
 | `--dry-run` | Off | Preview what would be done without writing any files. Useful for validation. |
 | `--verbose` | Off | Enable debug-level logging. Shows detailed shader detection, property mapping, and file operations. |
 | `--skip-fbx-copy` | Off | Skip copying FBX files to output/models/. Use when re-running conversion and models already exist. |

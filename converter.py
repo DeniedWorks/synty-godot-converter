@@ -17,6 +17,7 @@ Usage:
 Pipeline Steps:
     1. Validate inputs (package exists, source-files directory exists, godot exists)
     2. Create output directory structure
+    2.5. Build source files from the package when --source-files is omitted
     3. Extract Unity package
     4. Parse all .mat files
     4.5. Parse MaterialList.txt early (for shader detection)
@@ -43,12 +44,14 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 
 # Local imports
+from asset_store import apply_fbx_scales, build_source_files
 from unity_package import extract_unitypackage, GuidMap, get_material_guids, get_material_name
 from unity_parser import parse_material_bytes, UnityMaterial
 from shader_mapping import map_material, detect_shader_type, determine_shader, MappedMaterial
@@ -372,7 +375,7 @@ class ConversionConfig:
     """
 
     unity_package: Path
-    source_files: Path
+    source_files: Path | None
     output_dir: Path
     godot_exe: Path
     dry_run: bool = False
@@ -495,8 +498,9 @@ Examples:
     parser.add_argument(
         "--source-files",
         type=Path,
-        required=True,
-        help="Path to SourceFiles folder containing FBX/ (Textures/ optional - textures come from .unitypackage)",
+        default=None,
+        help="Path to SourceFiles folder containing FBX/ (Textures/ optional - textures come from .unitypackage). "
+             "Omit for Asset Store packages: FBX files and MaterialList.txt are then built from the package.",
     )
     parser.add_argument(
         "--output",
@@ -598,16 +602,17 @@ Examples:
     if not args.unity_package.exists():
         parser.error(f"Unity package not found: {args.unity_package}")
 
-    if not args.source_files.exists():
-        parser.error(f"Source files directory not found: {args.source_files}")
+    resolved_source_files = None
+    if args.source_files is not None:
+        if not args.source_files.exists():
+            parser.error(f"Source files directory not found: {args.source_files}")
 
-    # Resolve nested SourceFiles folder structure (e.g., PackName_SourceFiles_v2/SourceFiles/)
-    resolved_source_files = resolve_source_files_path(args.source_files)
+        # Resolve nested SourceFiles folder structure (e.g., PackName_SourceFiles_v2/SourceFiles/)
+        resolved_source_files = resolve_source_files_path(args.source_files).resolve()
 
     # Note: Textures directory is optional - textures primarily come from .unitypackage
     # SourceFiles/Textures is used as a fallback only
-    textures_dir = resolved_source_files / "Textures"
-    if not textures_dir.exists():
+    if resolved_source_files and not (resolved_source_files / "Textures").exists():
         # Try to find any Textures directory recursively
         texture_dirs = list(resolved_source_files.rglob("Textures"))
         texture_dirs = [d for d in texture_dirs if d.is_dir()]
@@ -624,7 +629,7 @@ Examples:
 
     return ConversionConfig(
         unity_package=args.unity_package.resolve(),
-        source_files=resolved_source_files.resolve(),
+        source_files=resolved_source_files,
         output_dir=args.output.resolve(),
         godot_exe=args.godot.resolve(),
         dry_run=args.dry_run,
@@ -2102,6 +2107,22 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
 
     # Store temp dir path for cleanup (always runs via finally, even on error)
     temp_dir_to_cleanup = None
+    built_source_dir = None
+    fbx_scales: dict[str, float] = {}
+
+    # Step 2.5: Asset Store packages ship without SourceFiles; rebuild them from the package
+    if config.source_files is None and not skip_to_godot:
+        logger.info("Step 2.5: Building source files from Unity package...")
+        built_source_dir = Path(tempfile.mkdtemp(prefix="synty_source_"))
+        try:
+            fbx_scales = build_source_files(config.unity_package, built_source_dir)
+        except Exception as e:
+            shutil.rmtree(built_source_dir, ignore_errors=True)
+            error_msg = f"Failed to build source files from Unity package: {e}"
+            logger.error(error_msg)
+            stats.errors.append(error_msg)
+            return stats
+        config = replace(config, source_files=built_source_dir)
 
     # Steps 3-10: Skip if existing pack detected with all prerequisites
     if not skip_to_godot:
@@ -2114,6 +2135,8 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
             error_msg = f"Failed to extract Unity package: {e}"
             logger.error(error_msg)
             stats.errors.append(error_msg)
+            if built_source_dir:
+                shutil.rmtree(built_source_dir, ignore_errors=True)
             return stats
 
         if guid_map.texture_guid_to_path:
@@ -2382,6 +2405,11 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
                 if stats.fbx_copied == 0 and stats.fbx_skipped == 0 and total_count == 0:
                     warning_msg = f"No FBX files found in {config.source_files}"
                     stats.warnings.append(warning_msg)
+
+                # Unity's per-FBX import scale (e.g. 100 for centimetre models) must reach
+                # Godot's .import files before Godot imports the FBX files in Step 12
+                if fbx_scales and not config.dry_run:
+                    apply_fbx_scales(models_dir, fbx_scales, project_dir)
             else:
                 logger.info("Step 9: Skipping FBX copy...")
 
@@ -2495,6 +2523,9 @@ def run_conversion(config: ConversionConfig) -> ConversionStats:
         if temp_dir_to_cleanup and temp_dir_to_cleanup.exists():
             shutil.rmtree(temp_dir_to_cleanup, ignore_errors=True)
             logger.debug("Cleaned up temp texture directory: %s", temp_dir_to_cleanup)
+        if built_source_dir and built_source_dir.exists():
+            shutil.rmtree(built_source_dir, ignore_errors=True)
+            logger.debug("Cleaned up built source files: %s", built_source_dir)
 
 
 def main() -> int:
